@@ -61,7 +61,6 @@ echo "127.0.0.1 localhost" >> /etc/hosts # enables cmds like 'kubectl get pods' 
 mkdir -p /etc/salt/minion.d
 cat <<EOF >/etc/salt/minion.d/master.conf
 master: '$(echo "$MASTER_NAME" | sed -e "s/'/''/g")'
-master: '$(echo "$MASTER_NAME" | sed -e "s/'/''/g")'
 auth_timeout: 10
 auth_tries: 2
 auth_safemode: True
@@ -86,7 +85,7 @@ EOF
 
 mkdir -p /srv/salt-overlay/pillar
 cat <<EOF >/srv/salt-overlay/pillar/cluster-params.sls
-  portal_net: '$(echo "$PORTAL_NET" | sed -e "s/'/''/g")'
+  service_cluster_ip_range: '$(echo "$SERVICE_CLUSTER_IP_RANGE" | sed -e "s/'/''/g")'
   cert_ip: '$(echo "$MASTER_IP" | sed -e "s/'/''/g")'
   enable_cluster_monitoring: '$(echo "$ENABLE_CLUSTER_MONITORING" | sed -e "s/'/''/g")'
   enable_node_monitoring: '$(echo "$ENABLE_NODE_MONITORING" | sed -e "s/'/''/g")'
@@ -216,7 +215,7 @@ external_auth:
       - .*
 rest_cherrypy:
   port: 8000
-  host: 127.0.0.1
+  host: ${MASTER_IP}
   disable_ssl: True
   webhook_disable_auth: True
 EOF
@@ -249,5 +248,5 @@ else
   # set up to run highstate as new minions join for the first time.
   echo "Executing configuration"
   salt '*' mine.update
-  salt --show-timeout --force-color '*' state.highstate
+  salt --force-color '*' state.highstate
 fi

@@ -33,16 +33,12 @@ import (
 	"github.com/GoogleCloudPlatform/kubernetes/pkg/api/latest"
 	"github.com/GoogleCloudPlatform/kubernetes/pkg/api/rest"
 	"github.com/GoogleCloudPlatform/kubernetes/pkg/api/v1"
-	"github.com/GoogleCloudPlatform/kubernetes/pkg/api/v1beta1"
-	"github.com/GoogleCloudPlatform/kubernetes/pkg/api/v1beta2"
 	"github.com/GoogleCloudPlatform/kubernetes/pkg/api/v1beta3"
 	"github.com/GoogleCloudPlatform/kubernetes/pkg/apiserver"
 	"github.com/GoogleCloudPlatform/kubernetes/pkg/auth/authenticator"
 	"github.com/GoogleCloudPlatform/kubernetes/pkg/auth/authorizer"
 	"github.com/GoogleCloudPlatform/kubernetes/pkg/auth/handlers"
 	"github.com/GoogleCloudPlatform/kubernetes/pkg/client"
-	"github.com/GoogleCloudPlatform/kubernetes/pkg/fields"
-	"github.com/GoogleCloudPlatform/kubernetes/pkg/labels"
 	"github.com/GoogleCloudPlatform/kubernetes/pkg/master/ports"
 	"github.com/GoogleCloudPlatform/kubernetes/pkg/registry/componentstatus"
 	controlleretcd "github.com/GoogleCloudPlatform/kubernetes/pkg/registry/controller/etcd"
@@ -87,17 +83,12 @@ type Config struct {
 	EventTTL      time.Duration
 	MinionRegexp  string
 	KubeletClient client.KubeletClient
-	PortalNet     *net.IPNet
 	// allow downstream consumers to disable the core controller loops
 	EnableCoreControllers bool
 	EnableLogsSupport     bool
 	EnableUISupport       bool
 	// allow downstream consumers to disable swagger
 	EnableSwaggerSupport bool
-	// allow v1beta1 to be conditionally disabled
-	DisableV1Beta1 bool
-	// allow v1beta2 to be conditionally disabled
-	DisableV1Beta2 bool
 	// allow v1beta3 to be conditionally disabled
 	DisableV1Beta3 bool
 	// allow v1 to be conditionally enabled
@@ -144,16 +135,19 @@ type Config struct {
 	// The name of the cluster.
 	ClusterName string
 
+	// The range of IPs to be assigned to services with type=ClusterIP or greater
+	ServiceClusterIPRange *net.IPNet
+
 	// The range of ports to be assigned to services with type=NodePort or greater
-	ServiceNodePorts util.PortRange
+	ServiceNodePortRange util.PortRange
 }
 
 // Master contains state for a Kubernetes cluster master/api server.
 type Master struct {
 	// "Inputs", Copied from Config
-	portalNet        *net.IPNet
-	serviceNodePorts util.PortRange
-	cacheTimeout     time.Duration
+	serviceClusterIPRange *net.IPNet
+	serviceNodePortRange  util.PortRange
+	cacheTimeout          time.Duration
 
 	mux                   apiserver.Mux
 	muxHelper             *apiserver.MuxHelper
@@ -170,8 +164,6 @@ type Master struct {
 	authorizer            authorizer.Authorizer
 	admissionControl      admission.Interface
 	masterCount           int
-	v1beta1               bool
-	v1beta2               bool
 	v1beta3               bool
 	v1                    bool
 	requestContextMapper  api.RequestContextMapper
@@ -194,12 +186,12 @@ type Master struct {
 	// registries are internal client APIs for accessing the storage layer
 	// TODO: define the internal typed interface in a way that clients can
 	// also be replaced
-	nodeRegistry             minion.Registry
-	namespaceRegistry        namespace.Registry
-	serviceRegistry          service.Registry
-	endpointRegistry         endpoint.Registry
-	portalAllocator          service.RangeRegistry
-	serviceNodePortAllocator service.RangeRegistry
+	nodeRegistry              minion.Registry
+	namespaceRegistry         namespace.Registry
+	serviceRegistry           service.Registry
+	endpointRegistry          endpoint.Registry
+	serviceClusterIPAllocator service.RangeRegistry
+	serviceNodePortAllocator  service.RangeRegistry
 
 	// "Outputs"
 	Handler         http.Handler
@@ -221,26 +213,26 @@ func NewEtcdHelper(client tools.EtcdGetSet, version string, prefix string) (help
 
 // setDefaults fills in any fields not set that are required to have valid data.
 func setDefaults(c *Config) {
-	if c.PortalNet == nil {
+	if c.ServiceClusterIPRange == nil {
 		defaultNet := "10.0.0.0/24"
-		glog.Warningf("Portal net unspecified. Defaulting to %v.", defaultNet)
-		_, portalNet, err := net.ParseCIDR(defaultNet)
+		glog.Warningf("Network range for service cluster IPs is unspecified. Defaulting to %v.", defaultNet)
+		_, serviceClusterIPRange, err := net.ParseCIDR(defaultNet)
 		if err != nil {
 			glog.Fatalf("Unable to parse CIDR: %v", err)
 		}
-		if size := ipallocator.RangeSize(portalNet); size < 8 {
-			glog.Fatalf("The portal net range must be at least %d IP addresses", 8)
+		if size := ipallocator.RangeSize(serviceClusterIPRange); size < 8 {
+			glog.Fatalf("The service cluster IP range must be at least %d IP addresses", 8)
 		}
-		c.PortalNet = portalNet
+		c.ServiceClusterIPRange = serviceClusterIPRange
 	}
-	if c.ServiceNodePorts.Size == 0 {
+	if c.ServiceNodePortRange.Size == 0 {
 		// TODO: Currently no way to specify an empty range (do we need to allow this?)
 		// We should probably allow this for clouds that don't require NodePort to do load-balancing (GCE)
 		// but then that breaks the strict nestedness of ServiceType.
 		// Review post-v1
-		defaultServiceNodePorts := util.PortRange{Base: 30000, Size: 2767}
-		c.ServiceNodePorts = defaultServiceNodePorts
-		glog.Infof("Node port range unspecified. Defaulting to %v.", c.ServiceNodePorts)
+		defaultServiceNodePortRange := util.PortRange{Base: 30000, Size: 2767}
+		c.ServiceNodePortRange = defaultServiceNodePortRange
+		glog.Infof("Node port range unspecified. Defaulting to %v.", c.ServiceNodePortRange)
 	}
 	if c.MasterCount == 0 {
 		// Clearly, there will be at least one master.
@@ -275,8 +267,8 @@ func setDefaults(c *Config) {
 // New returns a new instance of Master from the given config.
 // Certain config fields will be set to a default value if unset,
 // including:
-//   PortalNet
-//   ServiceNodePorts
+//   ServiceClusterIPRange
+//   ServiceNodePortRange
 //   MasterCount
 //   ReadOnlyPort
 //   ReadWritePort
@@ -303,20 +295,20 @@ func New(c *Config) *Master {
 		glog.Fatalf("master.New() called with config.KubeletClient == nil")
 	}
 
-	// Select the first two valid IPs from portalNet to use as the master service portalIPs
-	serviceReadOnlyIP, err := ipallocator.GetIndexedIP(c.PortalNet, 1)
+	// Select the first two valid IPs from serviceClusterIPRange to use as the master service IPs
+	serviceReadOnlyIP, err := ipallocator.GetIndexedIP(c.ServiceClusterIPRange, 1)
 	if err != nil {
 		glog.Fatalf("Failed to generate service read-only IP for master service: %v", err)
 	}
-	serviceReadWriteIP, err := ipallocator.GetIndexedIP(c.PortalNet, 2)
+	serviceReadWriteIP, err := ipallocator.GetIndexedIP(c.ServiceClusterIPRange, 2)
 	if err != nil {
 		glog.Fatalf("Failed to generate service read-write IP for master service: %v", err)
 	}
-	glog.V(4).Infof("Setting master service IPs based on PortalNet subnet to %q (read-only) and %q (read-write).", serviceReadOnlyIP, serviceReadWriteIP)
+	glog.V(4).Infof("Setting master service IPs based to %q (read-only) and %q (read-write).", serviceReadOnlyIP, serviceReadWriteIP)
 
 	m := &Master{
-		portalNet:             c.PortalNet,
-		serviceNodePorts:      c.ServiceNodePorts,
+		serviceClusterIPRange: c.ServiceClusterIPRange,
+		serviceNodePortRange:  c.ServiceNodePortRange,
 		rootWebService:        new(restful.WebService),
 		enableCoreControllers: c.EnableCoreControllers,
 		enableLogsSupport:     c.EnableLogsSupport,
@@ -328,8 +320,6 @@ func New(c *Config) *Master {
 		authenticator:         c.Authenticator,
 		authorizer:            c.Authorizer,
 		admissionControl:      c.AdmissionControl,
-		v1beta1:               !c.DisableV1Beta1,
-		v1beta2:               !c.DisableV1Beta2,
 		v1beta3:               !c.DisableV1Beta3,
 		v1:                    c.EnableV1,
 		requestContextMapper:  c.RequestContextMapper,
@@ -442,17 +432,17 @@ func (m *Master) init(c *Config) {
 	registry := etcd.NewRegistry(c.EtcdHelper, podRegistry, m.endpointRegistry)
 	m.serviceRegistry = registry
 
-	var portalRangeRegistry service.RangeRegistry
-	portalAllocator := ipallocator.NewAllocatorCIDRRange(m.portalNet, func(max int, rangeSpec string) allocator.Interface {
+	var serviceClusterIPRegistry service.RangeRegistry
+	serviceClusterIPAllocator := ipallocator.NewAllocatorCIDRRange(m.serviceClusterIPRange, func(max int, rangeSpec string) allocator.Interface {
 		mem := allocator.NewAllocationMap(max, rangeSpec)
 		etcd := etcdallocator.NewEtcd(mem, "/ranges/serviceips", "serviceipallocation", c.EtcdHelper)
-		portalRangeRegistry = etcd
+		serviceClusterIPRegistry = etcd
 		return etcd
 	})
-	m.portalAllocator = portalRangeRegistry
+	m.serviceClusterIPAllocator = serviceClusterIPRegistry
 
 	var serviceNodePortRegistry service.RangeRegistry
-	serviceNodePortAllocator := portallocator.NewPortAllocatorCustom(m.serviceNodePorts, func(max int, rangeSpec string) allocator.Interface {
+	serviceNodePortAllocator := portallocator.NewPortAllocatorCustom(m.serviceNodePortRange, func(max int, rangeSpec string) allocator.Interface {
 		mem := allocator.NewAllocationMap(max, rangeSpec)
 		etcd := etcdallocator.NewEtcd(mem, "/ranges/servicenodeports", "servicenodeportallocation", c.EtcdHelper)
 		serviceNodePortRegistry = etcd
@@ -476,7 +466,7 @@ func (m *Master) init(c *Config) {
 		"podTemplates": podTemplateStorage,
 
 		"replicationControllers": controllerStorage,
-		"services":               service.NewStorage(m.serviceRegistry, m.nodeRegistry, m.endpointRegistry, portalAllocator, serviceNodePortAllocator, c.ClusterName),
+		"services":               service.NewStorage(m.serviceRegistry, m.nodeRegistry, m.endpointRegistry, serviceClusterIPAllocator, serviceNodePortAllocator, c.ClusterName),
 		"endpoints":              endpointsStorage,
 		"minions":                nodeStorage,
 		"minions/status":         nodeStatusStorage,
@@ -497,22 +487,10 @@ func (m *Master) init(c *Config) {
 		"persistentVolumeClaims":        persistentVolumeClaimStorage,
 		"persistentVolumeClaims/status": persistentVolumeClaimStatusStorage,
 
-		"componentStatuses": componentstatus.NewStorage(func() map[string]apiserver.Server { return m.getServersToValidate(c, false) }),
+		"componentStatuses": componentstatus.NewStorage(func() map[string]apiserver.Server { return m.getServersToValidate(c) }),
 	}
 
 	apiVersions := []string{}
-	if m.v1beta1 {
-		if err := m.api_v1beta1().InstallREST(m.handlerContainer); err != nil {
-			glog.Fatalf("Unable to setup API v1beta1: %v", err)
-		}
-		apiVersions = append(apiVersions, "v1beta1")
-	}
-	if m.v1beta2 {
-		if err := m.api_v1beta2().InstallREST(m.handlerContainer); err != nil {
-			glog.Fatalf("Unable to setup API v1beta2: %v", err)
-		}
-		apiVersions = append(apiVersions, "v1beta2")
-	}
 	if m.v1beta3 {
 		if err := m.api_v1beta3().InstallREST(m.handlerContainer); err != nil {
 			glog.Fatalf("Unable to setup API v1beta3: %v", err)
@@ -539,8 +517,6 @@ func (m *Master) init(c *Config) {
 		m.mux.HandleFunc("/", apiserver.IndexHandler(m.handlerContainer, m.muxHelper))
 	}
 
-	// TODO: This is now deprecated. Should be removed once client dependencies are gone.
-	apiserver.InstallValidator(m.muxHelper, func() map[string]apiserver.Server { return m.getServersToValidate(c, true) })
 	if c.EnableLogsSupport {
 		apiserver.InstallLogsSupport(m.muxHelper)
 	}
@@ -616,17 +592,18 @@ func (m *Master) NewBootstrapController() *Controller {
 	return &Controller{
 		NamespaceRegistry: m.namespaceRegistry,
 		ServiceRegistry:   m.serviceRegistry,
-		ServiceIPRegistry: m.portalAllocator,
-		EndpointRegistry:  m.endpointRegistry,
-		PortalNet:         m.portalNet,
 		MasterCount:       m.masterCount,
 
-		ServiceNodePortRegistry: m.serviceNodePortAllocator,
-		ServiceNodePorts:        m.serviceNodePorts,
+		EndpointRegistry: m.endpointRegistry,
+		EndpointInterval: 10 * time.Second,
 
+		ServiceClusterIPRegistry: m.serviceClusterIPAllocator,
+		ServiceClusterIPRange:    m.serviceClusterIPRange,
+		ServiceClusterIPInterval: 3 * time.Minute,
+
+		ServiceNodePortRegistry: m.serviceNodePortAllocator,
+		ServiceNodePortRange:    m.serviceNodePortRange,
 		ServiceNodePortInterval: 3 * time.Minute,
-		PortalIPInterval:        3 * time.Minute,
-		EndpointInterval:        10 * time.Second,
 
 		PublicIP: m.clusterIP,
 
@@ -673,7 +650,7 @@ func (m *Master) InstallSwaggerAPI() {
 	swagger.RegisterSwaggerService(swaggerConfig, m.handlerContainer)
 }
 
-func (m *Master) getServersToValidate(c *Config, includeNodes bool) map[string]apiserver.Server {
+func (m *Master) getServersToValidate(c *Config) map[string]apiserver.Server {
 	serversToValidate := map[string]apiserver.Server{
 		"controller-manager": {Addr: "127.0.0.1", Port: ports.ControllerManagerPort, Path: "/healthz"},
 		"scheduler":          {Addr: "127.0.0.1", Port: ports.SchedulerPort, Path: "/healthz"},
@@ -700,15 +677,6 @@ func (m *Master) getServersToValidate(c *Config, includeNodes bool) map[string]a
 		}
 		serversToValidate[fmt.Sprintf("etcd-%d", ix)] = apiserver.Server{Addr: addr, Port: port, Path: "/v2/keys/"}
 	}
-	if includeNodes && m.nodeRegistry != nil {
-		nodes, err := m.nodeRegistry.ListMinions(api.NewDefaultContext(), labels.Everything(), fields.Everything())
-		if err != nil {
-			glog.Errorf("Failed to list minions: %v", err)
-		}
-		for ix, node := range nodes.Items {
-			serversToValidate[fmt.Sprintf("node-%d", ix)] = apiserver.Server{Addr: node.Name, Port: ports.KubeletPort, Path: "/healthz", EnableHTTPS: true}
-		}
-	}
 	return serversToValidate
 }
 
@@ -726,38 +694,6 @@ func (m *Master) defaultAPIGroupVersion() *apiserver.APIGroupVersion {
 		Admit:   m.admissionControl,
 		Context: m.requestContextMapper,
 	}
-}
-
-// api_v1beta1 returns the resources and codec for API version v1beta1.
-func (m *Master) api_v1beta1() *apiserver.APIGroupVersion {
-	storage := make(map[string]rest.Storage)
-	for k, v := range m.storage {
-		if k == "podTemplates" {
-			continue
-		}
-		storage[k] = v
-	}
-	version := m.defaultAPIGroupVersion()
-	version.Storage = storage
-	version.Version = "v1beta1"
-	version.Codec = v1beta1.Codec
-	return version
-}
-
-// api_v1beta2 returns the resources and codec for API version v1beta2.
-func (m *Master) api_v1beta2() *apiserver.APIGroupVersion {
-	storage := make(map[string]rest.Storage)
-	for k, v := range m.storage {
-		if k == "podTemplates" {
-			continue
-		}
-		storage[k] = v
-	}
-	version := m.defaultAPIGroupVersion()
-	version.Storage = storage
-	version.Version = "v1beta2"
-	version.Codec = v1beta2.Codec
-	return version
 }
 
 // api_v1beta3 returns the resources and codec for API version v1beta3.

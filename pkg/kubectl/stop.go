@@ -60,6 +60,10 @@ func ReaperFor(kind string, c client.Interface) (Reaper, error) {
 	return nil, &NoSuchReaperError{kind}
 }
 
+func ReaperForReplicationController(c client.Interface, timeout time.Duration) (Reaper, error) {
+	return &ReplicationControllerReaper{c, Interval, timeout}, nil
+}
+
 type ReplicationControllerReaper struct {
 	client.Interface
 	pollInterval, timeout time.Duration
@@ -78,13 +82,13 @@ type objInterface interface {
 
 func (reaper *ReplicationControllerReaper) Stop(namespace, name string, gracePeriod *api.DeleteOptions) (string, error) {
 	rc := reaper.ReplicationControllers(namespace)
-	resizer, err := ResizerFor("ReplicationController", NewResizerClient(*reaper))
+	scaler, err := ScalerFor("ReplicationController", NewScalerClient(*reaper))
 	if err != nil {
 		return "", err
 	}
 	retry := NewRetryParams(reaper.pollInterval, reaper.timeout)
 	waitForReplicas := NewRetryParams(reaper.pollInterval, reaper.timeout)
-	if err = resizer.Resize(namespace, name, 0, nil, retry, waitForReplicas); err != nil {
+	if err = scaler.Scale(namespace, name, 0, nil, retry, waitForReplicas); err != nil {
 		return "", err
 	}
 	if err := rc.Delete(name); err != nil {

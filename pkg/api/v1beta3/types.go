@@ -131,6 +131,10 @@ type ObjectMeta struct {
 	// will send a hard termination signal to the container.
 	DeletionTimestamp *util.Time `json:"deletionTimestamp,omitempty" description:"RFC 3339 date and time at which the object will be deleted; populated by the system when a graceful deletion is requested, read-only; if not set, graceful deletion of the object has not been requested"`
 
+	// DeletionGracePeriodSeconds records the graceful deletion value set when graceful deletion
+	// was requested. Represents the most recent grace period, and may only be shortened once set.
+	DeletionGracePeriodSeconds *int64 `json:"deletionGracePeriodSeconds,omitempty" description:"number of seconds allowed for this object to gracefully terminate before it will be removed from the system; only set when deletionTimestamp is also set, read-only; may only be shortened"`
+
 	// Labels are key value pairs that may be used to scope and select individual resources.
 	// TODO: replace map[string]string with labels.LabelSet type
 	Labels map[string]string `json:"labels,omitempty" description:"map of string keys and values that can be used to organize and categorize objects; may match selectors of replication controllers and services"`
@@ -223,7 +227,7 @@ type VolumeSource struct {
 	// PersistentVolumeClaimVolumeSource represents a reference to a PersistentVolumeClaim in the same namespace
 	PersistentVolumeClaimVolumeSource *PersistentVolumeClaimVolumeSource `json:"persistentVolumeClaim,omitempty" description:"a reference to a PersistentVolumeClaim in the same namespace"`
 	// RBD represents a Rados Block Device mount on the host that shares a pod's lifetime
-	RBD *RBDVolumeSource `json:"rbd" description:"rados block volume that will be mounted on the host machine"`
+	RBD *RBDVolumeSource `json:"rbd,omitempty" description:"rados block volume that will be mounted on the host machine"`
 }
 
 type PersistentVolumeClaimVolumeSource struct {
@@ -252,7 +256,10 @@ type PersistentVolumeSource struct {
 	// NFS represents an NFS mount on the host
 	NFS *NFSVolumeSource `json:"nfs,omitempty" description:"NFS volume resource provisioned by an admin"`
 	// RBD represents a Rados Block Device mount on the host that shares a pod's lifetime
-	RBD *RBDVolumeSource `json:"rbd" description:"rados block volume that will be mounted on the host machine"`
+	RBD *RBDVolumeSource `json:"rbd,omitempty" description:"rados block volume that will be mounted on the host machine"`
+	// ISCSI represents an ISCSI Disk resource that is attached to a
+	// kubelet's host machine and then exposed to the pod.
+	ISCSI *ISCSIVolumeSource `json:"iscsi,omitempty" description:"an iSCSI disk resource provisioned by an admin"`
 }
 
 type PersistentVolume struct {
@@ -550,9 +557,15 @@ type VolumeMount struct {
 type EnvVar struct {
 	// Required: This must be a C_IDENTIFIER.
 	Name string `json:"name" description:"name of the environment variable; must be a C_IDENTIFIER"`
-	// Optional: No more than one of the following may be set.
-	// Optional: Defaults to ""
-	Value string `json:"value,omitempty" description:"value of the environment variable; defaults to empty string"`
+	// Optional: no more than one of the following may be specified.
+	// Optional: Defaults to ""; variable references $(VAR_NAME) are expanded
+	// using the previous defined environment variables in the container and
+	// any service environment variables.  If a variable cannot be resolved,
+	// the reference in the input string will be unchanged.  The $(VAR_NAME)
+	// syntax can be escaped with a double $$, ie: $$(VAR_NAME).  Escaped
+	// references will never be expanded, regardless of whether the variable
+	// exists or not.
+	Value string `json:"value,omitempty" description:"value of the environment variable; defaults to empty string; variable references $(VAR_NAME) are expanded using the previously defined environment varibles in the container and any service environment variables; if a variable cannot be resolved, the reference in the input string will be unchanged; the $(VAR_NAME) syntax can be escaped with a double $$, ie: $$(VAR_NAME) ; escaped references will never be expanded, regardless of whether the variable exists or not"`
 	// Optional: Specifies a source the value of this var should come from.
 	ValueFrom *EnvVarSource `json:"valueFrom,omitempty" description:"source for the environment variable's value; cannot be used if value is not empty"`
 }
@@ -653,9 +666,17 @@ type Container struct {
 	// Required.
 	Image string `json:"image" description:"Docker image name"`
 	// Optional: The docker image's entrypoint is used if this is not provided; cannot be updated.
-	Command []string `json:"command,omitempty" description:"entrypoint array; not executed within a shell; the docker image's entrypoint is used if this is not provided; cannot be updated"`
+	// Variable references $(VAR_NAME) are expanded using the container's environment.  If a variable
+	// cannot be resolved, the reference in the input string will be unchanged.  The $(VAR_NAME) syntax
+	// can be escaped with a double $$, ie: $$(VAR_NAME).  Escaped references will never be expanded,
+	// regardless of whether the variable exists or not.
+	Command []string `json:"command,omitempty" description:"entrypoint array; not executed within a shell; the docker image's entrypoint is used if this is not provided; cannot be updated; variable references $(VAR_NAME) are expanded using the container's environment variables; if a variable cannot be resolved, the reference in the input string will be unchanged; the $(VAR_NAME) syntax can be escaped with a double $$, ie: $$(VAR_NAME) ; escaped references will never be expanded, regardless of whether the variable exists or not"`
 	// Optional: The docker image's cmd is used if this is not provided; cannot be updated.
-	Args []string `json:"args,omitempty" description:"command array; the docker image's cmd is used if this is not provided; arguments to the entrypoint; cannot be updated"`
+	// Variable references $(VAR_NAME) are expanded using the container's environment.  If a variable
+	// cannot be resolved, the reference in the input string will be unchanged.  The $(VAR_NAME) syntax
+	// can be escaped with a double $$, ie: $$(VAR_NAME).  Escaped references will never be expanded,
+	// regardless of whether the variable exists or not.
+	Args []string `json:"args,omitempty" description:"command array; the docker image's cmd is used if this is not provided; arguments to the entrypoint; cannot be updated; variable references $(VAR_NAME) are expanded using the container's environment variables; if a variable cannot be resolved, the reference in the input string will be unchanged; the $(VAR_NAME) syntax can be escaped with a double $$, ie: $$(VAR_NAME) ; escaped references will never be expanded, regardless of whether the variable exists or not"`
 	// Optional: Defaults to Docker's default.
 	WorkingDir     string               `json:"workingDir,omitempty" description:"container's working directory; defaults to image's default; cannot be updated"`
 	Ports          []ContainerPort      `json:"ports,omitempty" description:"list of ports to expose from the container; cannot be updated" patchStrategy:"merge" patchMergeKey:"containerPort"`
@@ -825,6 +846,8 @@ const (
 	// DNSDefault indicates that the pod should use the default (as
 	// determined by kubelet) DNS settings.
 	DNSDefault DNSPolicy = "Default"
+
+	DefaultTerminationGracePeriodSeconds = 30
 )
 
 // PodSpec is a description of a pod
@@ -832,14 +855,14 @@ type PodSpec struct {
 	Volumes []Volume `json:"volumes,omitempty" description:"list of volumes that can be mounted by containers belonging to the pod" patchStrategy:"merge" patchMergeKey:"name"`
 	// Required: there must be at least one container in a pod.
 	Containers    []Container   `json:"containers" description:"list of containers belonging to the pod; cannot be updated; containers cannot currently be added or removed; there must be at least one container in a Pod" patchStrategy:"merge" patchMergeKey:"name"`
-	RestartPolicy RestartPolicy `json:"restartPolicy,omitempty" description:"restart policy for all containers within the pod; one of RestartPolicyAlways, RestartPolicyOnFailure, RestartPolicyNever"`
+	RestartPolicy RestartPolicy `json:"restartPolicy,omitempty" description:"restart policy for all containers within the pod; one of RestartPolicyAlways, RestartPolicyOnFailure, RestartPolicyNever; defaults to RestartPolicyAlways"`
 	// Optional duration in seconds the pod needs to terminate gracefully. May be decreased in delete request.
 	// Value must be non-negative integer. The value zero indicates delete immediately.
 	// If this value is nil, the default grace period will be used instead.
 	// The grace period is the duration in seconds after the processes running in the pod are sent
 	// a termination signal and the time when the processes are forcibly halted with a kill signal.
 	// Set this value longer than the expected cleanup time for your process.
-	TerminationGracePeriodSeconds *int64 `json:"terminationGracePeriodSeconds,omitempty" description:"optional duration in seconds the pod needs to terminate gracefully; may be decreased in delete request; value must be non-negative integer; the value zero indicates delete immediately; if this value is not set, the default grace period will be used instead; the grace period is the duration in seconds after the processes running in the pod are sent a termination signal and the time when the processes are forcibly halted with a kill signal; set this value longer than the expected cleanup time for your process"`
+	TerminationGracePeriodSeconds *int64 `json:"terminationGracePeriodSeconds,omitempty" description:"optional duration in seconds the pod needs to terminate gracefully; may be decreased in delete request; value must be non-negative integer; the value zero indicates delete immediately; if this value is not set, the default grace period will be used instead; the grace period is the duration in seconds after the processes running in the pod are sent a termination signal and the time when the processes are forcibly halted with a kill signal; set this value longer than the expected cleanup time for your process; defaults to 30 seconds"`
 	ActiveDeadlineSeconds         *int64 `json:"activeDeadlineSeconds,omitempty" description:"optional duration in seconds the pod may be active on the node relative to StartTime before the system will actively try to mark it failed and kill associated containers; value must be a positive integer`
 	// Optional: Set DNS policy.  Defaults to "ClusterFirst"
 	DNSPolicy DNSPolicy `json:"dnsPolicy,omitempty" description:"DNS policy for containers within the pod; one of 'ClusterFirst' or 'Default'"`
@@ -847,7 +870,7 @@ type PodSpec struct {
 	NodeSelector map[string]string `json:"nodeSelector,omitempty" description:"selector which must match a node's labels for the pod to be scheduled on that node"`
 
 	// ServiceAccount is the name of the ServiceAccount to use to run this pod
-	ServiceAccount string `json:"serviceAccount" description:"name of the ServiceAccount to use to run this pod"`
+	ServiceAccount string `json:"serviceAccount,omitempty" description:"name of the ServiceAccount to use to run this pod"`
 
 	// Host is a request to schedule this pod onto a specific host.  If it is non-empty,
 	// the the scheduler simply schedules this pod onto that host, assuming that it fits
@@ -949,7 +972,7 @@ type ReplicationControllerSpec struct {
 
 	// TemplateRef is a reference to an object that describes the pod that will be created if
 	// insufficient replicas are detected.
-	TemplateRef *ObjectReference `json:"templateRef,omitempty" description:"reference to an object that describes the pod that will be created if insufficient replicas are detected"`
+	//TemplateRef *ObjectReference `json:"templateRef,omitempty" description:"reference to an object that describes the pod that will be created if insufficient replicas are detected"`
 
 	// Template is the object that describes the pod that will be created if
 	// insufficient replicas are detected. This takes precedence over a
@@ -1133,6 +1156,11 @@ type ServiceAccount struct {
 
 	// Secrets is the list of secrets allowed to be used by pods running using this ServiceAccount
 	Secrets []ObjectReference `json:"secrets,omitempty" description:"list of secrets that can be used by pods running as this service account" patchStrategy:"merge" patchMergeKey:"name"`
+
+	// ImagePullSecrets is a list of references to secrets in the same namespace to use for pulling any images
+	// in pods that reference this ServiceAccount.  ImagePullSecrets are distinct from Secrets because Secrets
+	// can be mounted in the pod, but ImagePullSecrets are only accessed by the kubelet.
+	ImagePullSecrets []LocalObjectReference `json:"imagePullSecrets,omitempty" description:"list of references to secrets in the same namespace available for pulling container images"`
 }
 
 // ServiceAccountList is a list of ServiceAccount objects
@@ -1214,7 +1242,9 @@ type NodeSpec struct {
 	// PodCIDR represents the pod IP range assigned to the node
 	PodCIDR string `json:"podCIDR,omitempty" description:"pod IP range assigned to the node"`
 	// External ID of the node assigned by some machine database (e.g. a cloud provider)
-	ExternalID string `json:"externalID,omitempty" description:"external ID assigned to the node by some machine database (e.g. a cloud provider). Defaults to node name when empty."`
+	ExternalID string `json:"externalID,omitempty" description:"deprecated. External ID assigned to the node by some machine database (e.g. a cloud provider). Defaults to node name when empty."`
+	// ID of the node assigned by the cloud provider
+	ProviderID string `json:"providerID,omitempty" description:"ID of the node assigned by the cloud provider in the format: <ProviderName>://<ProviderSpecificNodeID>"`
 	// Unschedulable controls node schedulability of new pods. By default node is schedulable.
 	Unschedulable bool `json:"unschedulable,omitempty" description:"disable pod scheduling on the node"`
 }

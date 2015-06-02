@@ -274,7 +274,7 @@ func (s activePods) Swap(i, j int) { s[i], s[j] = s[j], s[i] }
 
 func (s activePods) Less(i, j int) bool {
 	// Unassigned < assigned
-	if s[i].Spec.Host == "" && s[j].Spec.Host != "" {
+	if s[i].Spec.NodeName == "" && s[j].Spec.NodeName != "" {
 		return true
 	}
 	// PodPending < PodUnknown < PodRunning
@@ -294,7 +294,8 @@ func filterActivePods(pods []api.Pod) []*api.Pod {
 	var result []*api.Pod
 	for i := range pods {
 		if api.PodSucceeded != pods[i].Status.Phase &&
-			api.PodFailed != pods[i].Status.Phase {
+			api.PodFailed != pods[i].Status.Phase &&
+			pods[i].DeletionTimestamp == nil {
 			result = append(result, &pods[i])
 		}
 	}

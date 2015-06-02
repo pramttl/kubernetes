@@ -94,7 +94,7 @@ kube::log::status "Starting kube-apiserver"
   --kubelet_port=${KUBELET_PORT} \
   --runtime_config=api/v1beta3 \
   --cert_dir="${TMPDIR:-/tmp/}" \
-  --portal_net="10.0.0.0/24" 1>&2 &
+  --service-cluster-ip-range="10.0.0.0/24" 1>&2 &
 APISERVER_PID=$!
 
 kube::util::wait_for_url "http://127.0.0.1:${API_PORT}/healthz" "apiserver: "
@@ -114,8 +114,6 @@ PATH="${KUBE_OUTPUT_HOSTBIN}":$PATH
 
 kube_api_versions=(
   ""
-  v1beta1
-  v1beta2
   v1beta3
 )
 for version in "${kube_api_versions[@]}"; do
@@ -124,14 +122,14 @@ for version in "${kube_api_versions[@]}"; do
       -s "http://127.0.0.1:${API_PORT}"
       --match-server-version
     )
-    [ "$(kubectl get minions -t '{{ .apiVersion }}' "${kube_flags[@]}")" == "v1beta3" ]
+    [ "$(kubectl get nodes -t '{{ .apiVersion }}' "${kube_flags[@]}")" == "v1beta3" ]
   else
     kube_flags=(
       -s "http://127.0.0.1:${API_PORT}"
       --match-server-version
       --api-version="${version}"
     )
-    [ "$(kubectl get minions -t '{{ .apiVersion }}' "${kube_flags[@]}")" == "${version}" ]
+    [ "$(kubectl get nodes -t '{{ .apiVersion }}' "${kube_flags[@]}")" == "${version}" ]
   fi
   id_field=".metadata.name"
   labels_field=".metadata.labels"
@@ -171,7 +169,7 @@ for version in "${kube_api_versions[@]}"; do
   kube::test::get_object_assert 'pod/valid-pod' "{{$id_field}}" 'valid-pod'
   kube::test::get_object_assert 'pods/valid-pod' "{{$id_field}}" 'valid-pod'
   # Describe command should print detailed information
-  kube::test::describe_object_assert pods 'valid-pod' "Name:" "Image(s):" "Host:" "Labels:" "Status:" "Replication Controllers"
+  kube::test::describe_object_assert pods 'valid-pod' "Name:" "Image(s):" "Node:" "Labels:" "Status:" "Replication Controllers"
 
   ### Dump current valid-pod POD
   output_pod=$(kubectl get pod valid-pod -o yaml --output-version=v1beta3 "${kube_flags[@]}")
@@ -181,6 +179,11 @@ for version in "${kube_api_versions[@]}"; do
   kube::test::get_object_assert pods "{{range.items}}{{$id_field}}:{{end}}" 'valid-pod:'
   # Command
   kubectl delete pod valid-pod "${kube_flags[@]}"
+  # Post-condition: pod is still there, in terminating
+  kube::test::get_object_assert pods "{{range.items}}{{$id_field}}:{{end}}" 'valid-pod:'
+  [[ "$(kubectl get pods "${kube_flags[@]}" | grep Terminating)" ]]
+  # Command
+  kubectl delete pod valid-pod "${kube_flags[@]}" --grace-period=0
   # Post-condition: no POD is running
   kube::test::get_object_assert pods "{{range.items}}{{$id_field}}:{{end}}" ''
 
@@ -196,7 +199,7 @@ for version in "${kube_api_versions[@]}"; do
   # Pre-condition: valid-pod POD is running
   kube::test::get_object_assert pods "{{range.items}}{{$id_field}}:{{end}}" 'valid-pod:'
   # Command
-  kubectl delete -f examples/limitrange/valid-pod.json "${kube_flags[@]}"
+  kubectl delete -f examples/limitrange/valid-pod.json "${kube_flags[@]}" --grace-period=0
   # Post-condition: no POD is running
   kube::test::get_object_assert pods "{{range.items}}{{$id_field}}:{{end}}" ''
 
@@ -212,7 +215,7 @@ for version in "${kube_api_versions[@]}"; do
   # Pre-condition: valid-pod POD is running
   kube::test::get_object_assert "pods -l'name in (valid-pod)'" '{{range.items}}{{$id_field}}:{{end}}' 'valid-pod:'
   # Command
-  kubectl delete pods -l'name in (valid-pod)' "${kube_flags[@]}"
+  kubectl delete pods -l'name in (valid-pod)' "${kube_flags[@]}" --grace-period=0
   # Post-condition: no POD is running
   kube::test::get_object_assert "pods -l'name in (valid-pod)'" '{{range.items}}{{$id_field}}:{{end}}' ''
 
@@ -244,7 +247,7 @@ for version in "${kube_api_versions[@]}"; do
   # Pre-condition: valid-pod POD is running
   kube::test::get_object_assert pods "{{range.items}}{{$id_field}}:{{end}}" 'valid-pod:'
   # Command
-  kubectl delete --all pods "${kube_flags[@]}" # --all remove all the pods
+  kubectl delete --all pods "${kube_flags[@]}" --grace-period=0 # --all remove all the pods
   # Post-condition: no POD is running
   kube::test::get_object_assert "pods -l'name in (valid-pod)'" '{{range.items}}{{$id_field}}:{{end}}' ''
 
@@ -261,7 +264,7 @@ for version in "${kube_api_versions[@]}"; do
   # Pre-condition: valid-pod and redis-proxy PODs are running
   kube::test::get_object_assert pods "{{range.items}}{{$id_field}}:{{end}}" 'redis-proxy:valid-pod:'
   # Command
-  kubectl delete pods valid-pod redis-proxy "${kube_flags[@]}" # delete multiple pods at once
+  kubectl delete pods valid-pod redis-proxy "${kube_flags[@]}" --grace-period=0 # delete multiple pods at once
   # Post-condition: no POD is running
   kube::test::get_object_assert pods "{{range.items}}{{$id_field}}:{{end}}" ''
 
@@ -278,7 +281,7 @@ for version in "${kube_api_versions[@]}"; do
   # Pre-condition: valid-pod and redis-proxy PODs are running
   kube::test::get_object_assert pods "{{range.items}}{{$id_field}}:{{end}}" 'redis-proxy:valid-pod:'
   # Command
-  kubectl stop pods valid-pod redis-proxy "${kube_flags[@]}" # stop multiple pods at once
+  kubectl stop pods valid-pod redis-proxy "${kube_flags[@]}" --grace-period=0 # stop multiple pods at once
   # Post-condition: no POD is running
   kube::test::get_object_assert pods "{{range.items}}{{$id_field}}:{{end}}" ''
 
@@ -302,7 +305,7 @@ for version in "${kube_api_versions[@]}"; do
   # Pre-condition: valid-pod POD is running
   kube::test::get_object_assert pods "{{range.items}}{{$id_field}}:{{end}}" 'valid-pod:'
   # Command
-  kubectl delete pods -lnew-name=new-valid-pod "${kube_flags[@]}"
+  kubectl delete pods -lnew-name=new-valid-pod --grace-period=0 "${kube_flags[@]}"
   # Post-condition: no POD is running
   kube::test::get_object_assert pods "{{range.items}}{{$id_field}}:{{end}}" ''
 
@@ -334,7 +337,7 @@ for version in "${kube_api_versions[@]}"; do
   # Pre-condition: valid-pod POD is running
   kube::test::get_object_assert pods "{{range.items}}{{$id_field}}:{{end}}" 'valid-pod:'
   # Command
-  kubectl delete pods -l'name in (valid-pod-super-sayan)' "${kube_flags[@]}"
+  kubectl delete pods -l'name in (valid-pod-super-sayan)' --grace-period=0 "${kube_flags[@]}"
   # Post-condition: no POD is running
   kube::test::get_object_assert pods "{{range.items}}{{$id_field}}:{{end}}" ''
 
@@ -355,7 +358,7 @@ for version in "${kube_api_versions[@]}"; do
   # Pre-condition: valid-pod POD is running
   kube::test::get_object_assert 'pods --namespace=other' "{{range.items}}{{$id_field}}:{{end}}" 'valid-pod:'
   # Command
-  kubectl delete "${kube_flags[@]}" pod --namespace=other valid-pod
+  kubectl delete "${kube_flags[@]}" pod --namespace=other valid-pod --grace-period=0
   # Post-condition: no POD is running
   kube::test::get_object_assert 'pods --namespace=other' "{{range.items}}{{$id_field}}:{{end}}" ''
 
@@ -448,11 +451,6 @@ __EOF__
   # Post-condition:redis-master-service service is running
   kube::test::get_object_assert services "{{range.items}}{{$id_field}}:{{end}}" 'kubernetes:kubernetes-ro:redis-master:service-.*-test:'
 
-  # Command
-  kubectl update service "${kube_flags[@]}" service-${version}-test --patch="{\"spec\":{\"selector\":{\"my\":\"test-label\"}},\"apiVersion\":\"v1beta3\"}" --api-version=v1beta3
-  # Post-condition: selector has "test-label" label.
-  kube::test::get_object_assert "service service-${version}-test" "{{range$service_selector_field}}{{.}}{{end}}" "test-label"
-
   ### Identity
   kubectl get service "${kube_flags[@]}" service-${version}-test -o json | kubectl update "${kube_flags[@]}" -f -
 
@@ -499,27 +497,27 @@ __EOF__
   # Describe command should print detailed information
   kube::test::describe_object_assert rc 'frontend' "Name:" "Image(s):" "Labels:" "Selector:" "Replicas:" "Pods Status:"
 
-  ### Resize replication controller frontend with current-replicas and replicas
+  ### Scale replication controller frontend with current-replicas and replicas
   # Pre-condition: 3 replicas
   kube::test::get_object_assert 'rc frontend' "{{$rc_replicas_field}}" '3'
   # Command
-  kubectl resize --current-replicas=3 --replicas=2 replicationcontrollers frontend "${kube_flags[@]}"
+  kubectl scale --current-replicas=3 --replicas=2 replicationcontrollers frontend "${kube_flags[@]}"
   # Post-condition: 2 replicas
   kube::test::get_object_assert 'rc frontend' "{{$rc_replicas_field}}" '2'
 
-  ### Resize replication controller frontend with (wrong) current-replicas and replicas
+  ### Scale replication controller frontend with (wrong) current-replicas and replicas
   # Pre-condition: 2 replicas
   kube::test::get_object_assert 'rc frontend' "{{$rc_replicas_field}}" '2'
   # Command
-  ! kubectl resize --current-replicas=3 --replicas=2 replicationcontrollers frontend "${kube_flags[@]}"
+  ! kubectl scale --current-replicas=3 --replicas=2 replicationcontrollers frontend "${kube_flags[@]}"
   # Post-condition: nothing changed
   kube::test::get_object_assert 'rc frontend' "{{$rc_replicas_field}}" '2'
 
-  ### Resize replication controller frontend with replicas only
+  ### Scale replication controller frontend with replicas only
   # Pre-condition: 2 replicas
   kube::test::get_object_assert 'rc frontend' "{{$rc_replicas_field}}" '2'
   # Command
-  kubectl resize  --replicas=3 replicationcontrollers frontend "${kube_flags[@]}"
+  kubectl scale  --replicas=3 replicationcontrollers frontend "${kube_flags[@]}"
   # Post-condition: 3 replicas
   kube::test::get_object_assert 'rc frontend' "{{$rc_replicas_field}}" '3'
 
@@ -630,18 +628,17 @@ __EOF__
 
 
   ###########
-  # Minions #
+  # Nodes #
   ###########
 
   if [[ "${version}" = "v1beta1" ]] || [[ "${version}" = "v1beta2" ]]; then
-    kube::log::status "Testing kubectl(${version}:minions)"
+    kube::log::status "Testing kubectl(${version}:nodes)"
 
-    kube::test::get_object_assert minions "{{range.items}}{{$id_field}}:{{end}}" '127.0.0.1:'
+    kube::test::get_object_assert nodes "{{range.items}}{{$id_field}}:{{end}}" '127.0.0.1:'
 
-    # TODO: I should be a MinionList instead of List
-    kube::test::get_object_assert minions '{{.kind}}' 'List'
+    kube::test::get_object_assert nodes '{{.kind}}' 'List'
 
-    kube::test::describe_object_assert minions "127.0.0.1" "Name:" "Conditions:" "Addresses:" "Capacity:" "Pods:"
+    kube::test::describe_object_assert nodes "127.0.0.1" "Name:" "Conditions:" "Addresses:" "Capacity:" "Pods:"
   fi
 
 

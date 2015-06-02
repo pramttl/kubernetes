@@ -24,9 +24,10 @@ KUBE_ROOT=$(dirname "${BASH_SOURCE}")/..
 source "${KUBE_ROOT}/hack/lib/init.sh"
 
 # The api version in which objects are currently stored in etcd.
-KUBE_OLD_API_VERSION=${KUBE_OLD_API_VERSION:-"v1beta1"}
+KUBE_OLD_API_VERSION=${KUBE_OLD_API_VERSION:-"v1beta3"}
 # The api version in which our etcd objects should be converted to.
 # The new api version
+# TODO change this to v1 when it's ready.
 KUBE_NEW_API_VERSION=${KUBE_NEW_API_VERSION:-"v1beta3"}
 
 ETCD_HOST=${ETCD_HOST:-127.0.0.1}
@@ -53,7 +54,7 @@ function startApiServer() {
     --kubelet_port=${KUBELET_PORT} \
     --runtime_config="${RUNTIME_CONFIG}" \
     --cert_dir="${TMPDIR:-/tmp/}" \
-    --portal_net="10.0.0.0/24" 1>&2 &
+    --service-cluster-ip-range="10.0.0.0/24" 1>&2 &
   APISERVER_PID=$!
 
   kube::util::wait_for_url "http://127.0.0.1:${API_PORT}/healthz" "apiserver: "

@@ -138,7 +138,7 @@ func NewReplicationManager(kubeClient client.Interface, burstReplicas int) *Repl
 				rm.enqueueController(cur)
 			},
 			// This will enter the sync loop and no-op, becuase the controller has been deleted from the store.
-			// Note that deleting a controller immediately after resizing it to 0 will not work. The recommended
+			// Note that deleting a controller immediately after scaling it to 0 will not work. The recommended
 			// way of achieving this is by performing a `stop` operation on the controller.
 			DeleteFunc: rm.enqueueController,
 		},
@@ -204,6 +204,12 @@ func (rm *ReplicationManager) getPodControllers(pod *api.Pod) *api.ReplicationCo
 // When a pod is created, enqueue the controller that manages it and update it's expectations.
 func (rm *ReplicationManager) addPod(obj interface{}) {
 	pod := obj.(*api.Pod)
+	if pod.DeletionTimestamp != nil {
+		// on a restart of the controller manager, it's possible a new pod shows up in a state that
+		// is already pending deletion. Prevent the pod from being a creation observation.
+		rm.deletePod(pod)
+		return
+	}
 	if rc := rm.getPodControllers(pod); rc != nil {
 		rm.expectations.CreationObserved(rc)
 		rm.enqueueController(rc)
@@ -220,6 +226,15 @@ func (rm *ReplicationManager) updatePod(old, cur interface{}) {
 	}
 	// TODO: Write a unittest for this case
 	curPod := cur.(*api.Pod)
+	if curPod.DeletionTimestamp != nil {
+		// when a pod is deleted gracefully it's deletion timestamp is first modified to reflect a grace period,
+		// and after such time has passed, the kubelet actually deletes it from the store. We receive an update
+		// for modification of the deletion timestamp and expect an rc to create more replicas asap, not wait
+		// until the kubelet actually deletes the pod. This is different from the Phase of a pod changing, because
+		// an rc never initiates a phase change, and so is never asleep waiting for the same.
+		rm.deletePod(curPod)
+		return
+	}
 	if rc := rm.getPodControllers(curPod); rc != nil {
 		rm.enqueueController(rc)
 	}
@@ -237,26 +252,28 @@ func (rm *ReplicationManager) updatePod(old, cur interface{}) {
 // When a pod is deleted, enqueue the controller that manages the pod and update its expectations.
 // obj could be an *api.Pod, or a DeletionFinalStateUnknown marker item.
 func (rm *ReplicationManager) deletePod(obj interface{}) {
-	if pod, ok := obj.(*api.Pod); ok {
-		if rc := rm.getPodControllers(pod); rc != nil {
-			rm.expectations.DeletionObserved(rc)
-			rm.enqueueController(rc)
-		}
-		return
-	}
+	pod, ok := obj.(*api.Pod)
+
 	// When a delete is dropped, the relist will notice a pod in the store not
-	// in the list, leading to the insertion of a tombstone key. Since we don't
-	// know which rc to wake up/update expectations, we rely on the ttl on the
-	// expectation expiring. The rc syncs via the 30s periodic resync and notices
-	// fewer pods than its replica count.
-	podKey, err := framework.DeletionHandlingMetaNamespaceKeyFunc(obj)
-	if err != nil {
-		glog.Errorf("Couldn't get key for object %+v: %v", obj, err)
-		return
+	// in the list, leading to the insertion of a tombstone object which contains
+	// the deleted key/value. Note that this value might be stale. If the pod
+	// changed labels the new rc will not be woken up till the periodic resync.
+	if !ok {
+		tombstone, ok := obj.(cache.DeletedFinalStateUnknown)
+		if !ok {
+			glog.Errorf("Couldn't get object from tombstone %+v, could take up to %v before a controller recreates a replica", obj, ExpectationsTimeout)
+			return
+		}
+		pod, ok = tombstone.Obj.(*api.Pod)
+		if !ok {
+			glog.Errorf("Tombstone contained object that is not a pod %+v, could take up to %v before controller recreates a replica", obj, ExpectationsTimeout)
+			return
+		}
 	}
-	// A periodic relist might not have a pod that the store has, in such cases we are sent a tombstone key.
-	// We don't know which controllers to sync, so just let the controller relist handle this.
-	glog.Infof("Pod %q was deleted but we don't have a record of its final state so it could take up to %v before a controller recreates a replica.", podKey, ExpectationsTimeout)
+	if rc := rm.getPodControllers(pod); rc != nil {
+		rm.expectations.DeletionObserved(rc)
+		rm.enqueueController(rc)
+	}
 }
 
 // obj could be an *api.ReplicationController, or a DeletionFinalStateUnknown marker item.

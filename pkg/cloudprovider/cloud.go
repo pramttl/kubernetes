@@ -18,6 +18,7 @@ package cloudprovider
 
 import (
 	"errors"
+	"fmt"
 	"net"
 	"strings"
 
@@ -36,6 +37,8 @@ type Interface interface {
 	Clusters() (Clusters, bool)
 	// Routes returns a routes interface along with whether the interface is supported.
 	Routes() (Routes, bool)
+	// ProviderName returns the cloud provider ID.
+	ProviderName() string
 }
 
 // Clusters is an abstract, pluggable interface for clusters of containers.
@@ -59,6 +62,18 @@ func GetLoadBalancerName(service *api.Service) string {
 	return ret
 }
 
+func GetInstanceProviderID(cloud Interface, nodeName string) (string, error) {
+	instances, ok := cloud.Instances()
+	if !ok {
+		return "", fmt.Errorf("failed to get instances from cloud provider")
+	}
+	instanceID, err := instances.InstanceID(nodeName)
+	if err != nil {
+		return "", fmt.Errorf("failed to get instance ID from cloud provider: %v", err)
+	}
+	return cloud.ProviderName() + "://" + instanceID, nil
+}
+
 // TCPLoadBalancer is an abstract, pluggable interface for TCP load balancers.
 type TCPLoadBalancer interface {
 	// TODO: Break this up into different interfaces (LB, etc) when we have more than one type of service
@@ -66,7 +81,7 @@ type TCPLoadBalancer interface {
 	// if so, what its status is.
 	GetTCPLoadBalancer(name, region string) (status *api.LoadBalancerStatus, exists bool, err error)
 	// CreateTCPLoadBalancer creates a new tcp load balancer. Returns the status of the balancer
-	CreateTCPLoadBalancer(name, region string, externalIP net.IP, ports []int, hosts []string, affinityType api.ServiceAffinity) (*api.LoadBalancerStatus, error)
+	CreateTCPLoadBalancer(name, region string, externalIP net.IP, ports []*api.ServicePort, hosts []string, affinityType api.ServiceAffinity) (*api.LoadBalancerStatus, error)
 	// UpdateTCPLoadBalancer updates hosts under the specified load balancer.
 	UpdateTCPLoadBalancer(name, region string, hosts []string) error
 	// EnsureTCPLoadBalancerDeleted deletes the specified load balancer if it
@@ -81,9 +96,14 @@ type TCPLoadBalancer interface {
 // Instances is an abstract, pluggable interface for sets of instances.
 type Instances interface {
 	// NodeAddresses returns the addresses of the specified instance.
+	// TODO(roberthbailey): This currently is only used in such a way that it
+	// returns the address of the calling instance. We should do a rename to
+	// make this clearer.
 	NodeAddresses(name string) ([]api.NodeAddress, error)
-	// ExternalID returns the cloud provider ID of the specified instance.
+	// ExternalID returns the cloud provider ID of the specified instance (deprecated).
 	ExternalID(name string) (string, error)
+	// InstanceID returns the cloud provider ID of the specified instance.
+	InstanceID(name string) (string, error)
 	// List lists instances that match 'filter' which is a regular expression which must match the entire instance name (fqdn)
 	List(filter string) ([]string, error)
 	// GetNodeResources gets the resources for a particular node

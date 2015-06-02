@@ -641,7 +641,9 @@ app.provider('k8sv1Beta3Api',
 
                  api.getPods = function(query) { return _get($http, api.getUrlBase() + '/pods', query); };
 
-                 api.getMinions = function(query) { return _get($http, urlBase + '/nodes', query); };
+                 api.getNodes = function(query) { return _get($http, urlBase + '/nodes', query); };
+
+                 api.getMinions = api.getNodes;
 
                  api.getServices = function(query) { return _get($http, api.getUrlBase() + '/services', query); };
 
@@ -1059,7 +1061,7 @@ app.controller('GroupCtrl', [
   '$route',
   '$interval',
   '$routeParams',
-  'k8sApi',
+  'k8sv1Beta3Api',
   '$rootScope',
   '$location',
   'lodash',
@@ -1156,7 +1158,7 @@ app.controller('GroupCtrl', [
         k8sApi.getPods(query).success(function(data) {
           $scope.addLabel("type", "pod", data.items);
           for (var i = 0; data.items && i < data.items.length; ++i) {
-            data.items[i].labels.host = data.items[i].currentState.host;
+            data.items[i].metadata.labels.host = data.items[i].spec.host;
             list.push(data.items[i]);
           }
           barrier();
@@ -1187,10 +1189,10 @@ app.controller('GroupCtrl', [
         return;
       }
       for (var i = 0; i < items.length; i++) {
-        if (!items[i].labels) {
-          items[i].labels = [];
+        if (!items[i].metadata.labels) {
+          items[i].metadata.labels = [];
         }
-        items[i].labels[key] = value;
+        items[i].metadata.labels[key] = value;
       }
     };
 
@@ -1200,7 +1202,7 @@ app.controller('GroupCtrl', [
         "kind": "grouping"
       };
       for (var i = 0; i < items.length; i++) {
-        key = items[i].labels[$scope.groupBy[index]];
+        key = items[i].metadata.labels[$scope.groupBy[index]];
         if (!key) {
           key = "";
         }
@@ -1249,7 +1251,7 @@ app.controller('GroupCtrl', [
     function buildGroupByOptions() {
       var g = $scope.groups;
       var options = getDefaultGroupByOptions();
-      var newOptions = _.map(g.items, function(vals) { return _.map(vals, function(v) { return _.keys(v.labels); }); });
+      var newOptions = _.map(g.items, function(vals) { return _.map(vals, function(v) { return _.keys(v.metadata.labels); }); });
       newOptions =
           _.reject(_.uniq(_.flattenDeep(newOptions)), function(o) { return o == 'name' || o == 'type' || o == ""; });
       newOptions = _.map(newOptions, function(o) {
@@ -1309,7 +1311,7 @@ angular.module('kubernetesApp.components.dashboard', [])
 app.controller('ListEventsCtrl', [
   '$scope',
   '$routeParams',
-  'k8sApi',
+  'k8sv1Beta3Api',
   '$location',
   '$filter',
   function($scope, $routeParams, k8sApi, $location, $filter) {
@@ -1322,26 +1324,20 @@ app.controller('ListEventsCtrl', [
     $scope.serverView = false;
 
     $scope.headers = [
-      {name: 'Time', field: 'time'},
-      {name: 'From', field: 'from'},
-      {name: 'Sub Object Path', field: 'subobject'},
+      {name: 'First Seen', field: 'firstSeen'},
+      {name: 'Last Seen', field: 'lastSeen'},
+      {name: 'Count', field: 'count'},
+      {name: 'Name', field: 'name'},
+      {name: 'Kind', field: 'kind'},
+      {name: 'SubObject', field: 'subObject'},
       {name: 'Reason', field: 'reason'},
+      {name: 'Source', field: 'source'},
       {name: 'Message', field: 'message'}
     ];
 
-    $scope.custom = {
-      time: '',
-      from: 'grey',
-      subobject: 'grey',
-      reason: 'grey',
-      message: 'grey'
-    };
-    $scope.sortable = ['time', 'from', 'subobject'];
-    $scope.thumbs = 'thumb';
+
+    $scope.sortable = ['firstSeen', 'lastSeen', 'count', 'name', 'kind', 'subObject', 'reason', 'source'];
     $scope.count = 10;
-
-    $scope.go = function(d) { $location.path('/dashboard/pods/' + d.id); };
-
     function handleError(data, status, headers, config) {
       console.log("Error (" + status + "): " + data);
       $scope.loading = false;
@@ -1363,14 +1359,25 @@ app.controller('ListEventsCtrl', [
         };
 
         data.items.forEach(function(event) {
+          var _sources = '';
+          if (event.source) {
+            _sources = event.source.component + ' ' + event.source.host;
+          }
+
 
           $scope.content.push({
-            time: $filter('date')(event.timestamp, 'medium'),
-            from: event.source,
-            subobject: event.involvedObject.fieldPath,
+            firstSeen: $filter('date')(event.firstTimestamp, 'medium'),
+            lastSeen: $filter('date')(event.lastTimestamp, 'medium'),
+            count: event.count,
+            name: event.involvedObject.name,
+            kind: event.involvedObject.kind,
+            subObject: event.involvedObject.fieldPath,
             reason: event.reason,
+            source: _sources,
             message: event.message
           });
+
+
 
         });
 
@@ -1390,7 +1397,7 @@ app.controller('ListEventsCtrl', [
 app.controller('ListMinionsCtrl', [
   '$scope',
   '$routeParams',
-  'k8sApi',
+  'k8sv1Beta3Api',
   '$location',
   function($scope, $routeParams, k8sApi, $location) {
     'use strict';
@@ -1401,7 +1408,7 @@ app.controller('ListMinionsCtrl', [
     $scope.groupedPods = null;
     $scope.serverView = false;
 
-    $scope.headers = [{name: 'Name', field: 'name'}, {name: 'IP', field: 'ip'}, {name: 'Status', field: 'status'}];
+    $scope.headers = [{name: 'Name', field: 'name'}, {name: 'Addresses', field: 'addresses'}, {name: 'Status', field: 'status'}];
 
     $scope.custom = {
       name: '',
@@ -1412,7 +1419,8 @@ app.controller('ListMinionsCtrl', [
     $scope.thumbs = 'thumb';
     $scope.count = 10;
 
-    $scope.go = function(data) { $location.path('/dashboard/nodes/' + data.name); };
+    $scope.go = function(d) { $location.path('/dashboard/nodes/' + d.name); };
+
 
     function handleError(data, status, headers, config) {
       console.log("Error (" + status + "): " + data);
@@ -1435,15 +1443,15 @@ app.controller('ListMinionsCtrl', [
         };
 
         data.items.forEach(function(minion) {
-          var _kind = '';
+          var _statusType = '';
 
           if (minion.status.conditions) {
             Object.keys(minion.status.conditions)
-                .forEach(function(key) { _kind += minion.status.conditions[key].kind; });
+                .forEach(function(key) { _statusType += minion.status.conditions[key].type; });
           }
 
-          $scope.content.push({name: minion.id, ip: minion.hostIP, status: _kind});
 
+          $scope.content.push({name: minion.metadata.name, addresses: _.map(minion.status.addresses, function(a) { return a.address }).join(', '), status: _statusType});
         });
 
       }).error($scope.handleError);
@@ -1459,7 +1467,7 @@ app.controller('ListMinionsCtrl', [
 app.controller('ListPodsCtrl', [
   '$scope',
   '$routeParams',
-  'k8sApi',
+  'k8sv1Beta3Api',
   'lodash',
   '$location',
   function($scope, $routeParams, k8sApi, lodash, $location) {
@@ -1502,7 +1510,7 @@ app.controller('ListPodsCtrl', [
       $scope.loading = false;
     };
 
-    function getPodName(pod) { return _.has(pod.labels, 'name') ? pod.labels.name : pod.id; }
+    function getPodName(pod) { return _.has(pod.metadata.labels, 'name') ? pod.metadata.labels.name : pod.metadata.name; }
 
     $scope.content = [];
 
@@ -1522,34 +1530,34 @@ app.controller('ListPodsCtrl', [
         data.items.forEach(function(pod) {
           var _containers = '', _images = '', _labels = '', _uses = '';
 
-          if (pod.desiredState.manifest) {
-            Object.keys(pod.desiredState.manifest.containers)
+          if (pod.spec) {
+            Object.keys(pod.spec.containers)
                 .forEach(function(key) {
-                  _containers += ', ' + pod.desiredState.manifest.containers[key].name;
-                  _images += ', ' + pod.desiredState.manifest.containers[key].image;
+                  _containers += ', ' + pod.spec.containers[key].name;
+                  _images += ', ' + pod.spec.containers[key].image;
                 });
           }
 
-          if (pod.labels) {
-            Object.keys(pod.labels)
+          if (pod.metadata.labels) {
+            Object.keys(pod.metadata.labels)
                 .forEach(function(key) {
                   if (key == 'name') {
-                    _labels += ', ' + pod.labels[key];
+                    _labels += ', ' + pod.metadata.labels[key];
                   }
                   if (key == 'uses') {
-                    _uses += ', ' + pod.labels[key];
+                    _uses += ', ' + pod.metadata.labels[key];
                   }
                 });
             }
 
           $scope.content.push({
-            pod: pod.id,
-            ip: pod.currentState.podIP,
+            pod: pod.metadata.name,
+            ip: pod.status.podIP,
             containers: _fixComma(_containers),
             images: _fixComma(_images),
-            host: pod.currentState.host,
+            host: pod.spec.host,
             labels: _fixComma(_labels) + ':' + _fixComma(_uses),
-            status: pod.currentState.status
+            status: pod.status.phase
           });
 
         });
@@ -1559,8 +1567,8 @@ app.controller('ListPodsCtrl', [
 
     $scope.getPodRestarts = function(pod) {
       var r = null;
-      var container = _.first(pod.desiredState.manifest.containers);
-      if (container) r = pod.currentState.info[container.name].restartCount;
+      var container = _.first(pod.spec.containers);
+      if (container) r = pod.status.containerStatuses[container.name].restartCount;
       return r;
     };
 
@@ -1568,7 +1576,7 @@ app.controller('ListPodsCtrl', [
 
     $scope.podStatusClass = function(pod) {
 
-      var s = pod.currentState.status.toLowerCase();
+      var s = pod.status.phase.toLowerCase();
 
       if (s == 'running' || s == 'succeeded')
         return null;
@@ -1594,7 +1602,7 @@ app.controller('ListPodsCtrl', [
 app.controller('ListReplicationControllersCtrl', [
   '$scope',
   '$routeParams',
-  'k8sApi',
+  'k8sv1Beta3Api',
   '$location',
   function($scope, $routeParams, k8sApi, $location) {
     'use strict';
@@ -1650,27 +1658,26 @@ app.controller('ListReplicationControllersCtrl', [
 
           var _name = '', _image = '';
 
-          if (replicationController.desiredState.podTemplate.desiredState.manifest.containers) {
-            Object.keys(replicationController.desiredState.podTemplate.desiredState.manifest.containers)
+          if (replicationController.spec.template.spec.containers) {
+            Object.keys(replicationController.spec.template.spec.containers)
                 .forEach(function(key) {
-                  _name += replicationController.desiredState.podTemplate.desiredState.manifest.containers[key].name;
-                  _image += replicationController.desiredState.podTemplate.desiredState.manifest.containers[key].image;
+                  _name += replicationController.spec.template.spec.containers[key].name;
+                  _image += replicationController.spec.template.spec.containers[key].image;
                 });
           }
 
-          var _name_selector = '';
+          var _selectors = '';
 
-          if (replicationController.desiredState.replicaSelector) {
-            Object.keys(replicationController.desiredState.replicaSelector)
-                .forEach(function(key) { _name_selector += replicationController.desiredState.replicaSelector[key]; });
+          if (replicationController.spec.selector) {
+            _selectors = _.map(replicationController.spec.selector, function(v, k) { return k + '=' + v }).join(', ');
           }
 
           $scope.content.push({
-            controller: replicationController.id,
+            controller: replicationController.metadata.name,
             containers: _name,
             images: _image,
-            selector: _name_selector,
-            replicas: replicationController.currentState.replicas
+            selector: _selectors,
+            replicas: replicationController.status.replicas
           });
 
         });
@@ -1692,7 +1699,7 @@ app.controller('ListServicesCtrl', [
   '$scope',
   '$interval',
   '$routeParams',
-  'k8sApi',
+  'k8sv1Beta3Api',
   '$rootScope',
   '$location',
   function($scope, $interval, $routeParams, k8sApi, $rootScope, $location) {
@@ -1704,7 +1711,7 @@ app.controller('ListServicesCtrl', [
       {name: 'Labels', field: 'labels'},
       {name: 'Selector', field: 'selector'},
       {name: 'IP', field: 'ip'},
-      {name: 'Port', field: 'port'}
+      {name: 'Ports', field: 'port'}
     ];
 
     $scope.custom = {
@@ -1752,41 +1759,36 @@ app.controller('ListServicesCtrl', [
         if (data.items.constructor === Array) {
           data.items.forEach(function(service) {
 
-            var _name = '', _uses = '', _component = '', _provider = '';
+            var _labels = '';
 
-            if (service.labels !== null && typeof service.labels === 'object') {
-              Object.keys(service.labels)
-                  .forEach(function(key) {
-                    if (key == 'name') {
-                      _name += ',' + service.labels[key];
-                    }
-                    if (key == 'component') {
-                      _component += ',' + service.labels[key];
-                    }
-                    if (key == 'provider') {
-                      _provider += ',' + service.labels[key];
-                    }
-                  });
+            if (service.metadata.labels) {
+              _labels = _.map(service.metadata.labels, function(v, k) { return k + '=' + v }).join(', ');
             }
 
             var _selectors = '';
 
-            if (service.selector !== null && typeof service.selector === 'object') {
-              Object.keys(service.selector)
-                  .forEach(function(key) {
-                    if (key == 'name') {
-                      _selectors += ',' + service.selector[key];
-                    }
-                  });
+            if (service.spec.selector) {
+              _selectors = _.map(service.spec.selector, function(v, k) { return k + '=' + v }).join(', ');
+            }
+
+            var _ports = '';
+
+            if (service.spec.ports) {
+              _ports = _.map(service.spec.ports, function(p) {
+                var n = '';
+                if(p.name)
+                  n = p.name + ': ';
+                 n = n + p.port;
+                return n;
+               }).join(', ');
             }
 
             $scope.content.push({
-              name: service.id,
-              ip: service.portalIP,
-              port: service.port,
-              selector: addLabel(_fixComma(_selectors), 'name='),
-              labels: addLabel(_fixComma(_name), 'name=') + ' ' + addLabel(_fixComma(_component), 'component=') + ' ' +
-                          addLabel(_fixComma(_provider), 'provider=')
+              name: service.metadata.name,
+              ip: service.spec.portalIP,
+              port: _ports,
+              selector: _selectors,
+              labels: _labels
             });
           });
         }
@@ -1806,7 +1808,7 @@ app.controller('NodeCtrl', [
   '$scope',
   '$interval',
   '$routeParams',
-  'k8sApi',
+  'k8sv1Beta3Api',
   '$rootScope',
   function($scope, $interval, $routeParams, k8sApi, $rootScope) {
     'use strict';
@@ -1840,7 +1842,7 @@ app.controller('PodCtrl', [
   '$scope',
   '$interval',
   '$routeParams',
-  'k8sApi',
+  'k8sv1Beta3Api',
   '$rootScope',
   function($scope, $interval, $routeParams, k8sApi, $rootScope) {
     'use strict';
@@ -1889,7 +1891,7 @@ ReplicationController.prototype.handleError = function(data, status, headers, co
 app.controller('ReplicationControllerCtrl', [
   '$scope',
   '$routeParams',
-  'k8sApi',
+  'k8sv1Beta3Api',
   function($scope, $routeParams, k8sApi) {
     $scope.controller = new ReplicationController();
     $scope.controller.k8sApi = k8sApi;
@@ -1897,6 +1899,7 @@ app.controller('ReplicationControllerCtrl', [
     $scope.controller.getData($routeParams.replicationControllerId);
 
     $scope.doTheBack = function() { window.history.back(); };
+    $scope.getSelectorUrlFragment = function(sel){ return _.map(sel, function(v, k) { return k + '=' + v }).join(','); };
 
   }
 ]);
@@ -1925,7 +1928,7 @@ ServiceController.prototype.handleError = function(data, status, headers, config
 app.controller('ServiceCtrl', [
   '$scope',
   '$routeParams',
-  'k8sApi',
+  'k8sv1Beta3Api',
   '$location',
   function($scope, $routeParams, k8sApi, $location) {
     $scope.controller = new ServiceController();
@@ -1934,6 +1937,8 @@ app.controller('ServiceCtrl', [
     $scope.controller.getData($routeParams.serviceId);
 
     $scope.doTheBack = function() { window.history.back(); };
+    $scope.go = function(d) { $location.path('/dashboard/services/' + d.metadata.name); }
+    $scope.getSelectorUrlFragment = function(sel){ return _.map(sel, function(v, k) { return k + '=' + v }).join(','); };
 
   }
 ]);

@@ -54,6 +54,7 @@ func newStorage(t *testing.T) (*REST, *BindingREST, *StatusREST, *tools.FakeEtcd
 }
 
 func validNewPod() *api.Pod {
+	grace := int64(30)
 	return &api.Pod{
 		ObjectMeta: api.ObjectMeta{
 			Name:      "foo",
@@ -62,6 +63,8 @@ func validNewPod() *api.Pod {
 		Spec: api.PodSpec{
 			RestartPolicy: api.RestartPolicyAlways,
 			DNSPolicy:     api.DNSClusterFirst,
+
+			TerminationGracePeriodSeconds: &grace,
 			Containers: []api.Container{
 				{
 					Name:            "foo",
@@ -132,9 +135,9 @@ func TestDelete(t *testing.T) {
 		if fakeEtcdClient.Data[key].R.Node == nil {
 			return false
 		}
-		return fakeEtcdClient.Data[key].R.Node.TTL == 30
+		return fakeEtcdClient.Data[key].R.Node.TTL != 0
 	}
-	test.TestDelete(createFn, gracefulSetFn)
+	test.TestDeleteGraceful(createFn, 30, gracefulSetFn)
 }
 
 func expectPod(t *testing.T, out runtime.Object) (*api.Pod, bool) {
@@ -231,14 +234,14 @@ func TestListPodList(t *testing.T) {
 					{
 						Value: runtime.EncodeOrDie(latest.Codec, &api.Pod{
 							ObjectMeta: api.ObjectMeta{Name: "foo"},
-							Spec:       api.PodSpec{Host: "machine"},
+							Spec:       api.PodSpec{NodeName: "machine"},
 							Status:     api.PodStatus{Phase: api.PodRunning},
 						}),
 					},
 					{
 						Value: runtime.EncodeOrDie(latest.Codec, &api.Pod{
 							ObjectMeta: api.ObjectMeta{Name: "bar"},
-							Spec:       api.PodSpec{Host: "machine"},
+							Spec:       api.PodSpec{NodeName: "machine"},
 						}),
 					},
 				},
@@ -255,10 +258,10 @@ func TestListPodList(t *testing.T) {
 	if len(pods.Items) != 2 {
 		t.Errorf("Unexpected pod list: %#v", pods)
 	}
-	if pods.Items[0].Name != "foo" || pods.Items[0].Status.Phase != api.PodRunning || pods.Items[0].Spec.Host != "machine" {
+	if pods.Items[0].Name != "foo" || pods.Items[0].Status.Phase != api.PodRunning || pods.Items[0].Spec.NodeName != "machine" {
 		t.Errorf("Unexpected pod: %#v", pods.Items[0])
 	}
-	if pods.Items[1].Name != "bar" || pods.Items[1].Spec.Host != "machine" {
+	if pods.Items[1].Name != "bar" || pods.Items[1].Spec.NodeName != "machine" {
 		t.Errorf("Unexpected pod: %#v", pods.Items[1])
 	}
 }
@@ -278,7 +281,7 @@ func TestListPodListSelection(t *testing.T) {
 					})},
 					{Value: runtime.EncodeOrDie(latest.Codec, &api.Pod{
 						ObjectMeta: api.ObjectMeta{Name: "bar"},
-						Spec:       api.PodSpec{Host: "barhost"},
+						Spec:       api.PodSpec{NodeName: "barhost"},
 					})},
 					{Value: runtime.EncodeOrDie(latest.Codec, &api.Pod{
 						ObjectMeta: api.ObjectMeta{Name: "baz"},
@@ -388,7 +391,7 @@ func TestPodDecode(t *testing.T) {
 func TestGet(t *testing.T) {
 	expect := validNewPod()
 	expect.Status.Phase = api.PodRunning
-	expect.Spec.Host = "machine"
+	expect.Spec.NodeName = "machine"
 
 	fakeEtcdClient, helper := newHelper(t)
 	key := etcdtest.AddPrefix("/pods/test/foo")
@@ -485,7 +488,7 @@ func TestUpdateWithConflictingNamespace(t *testing.T) {
 			Node: &etcd.Node{
 				Value: runtime.EncodeOrDie(latest.Codec, &api.Pod{
 					ObjectMeta: api.ObjectMeta{Name: "foo", Namespace: "default"},
-					Spec:       api.PodSpec{Host: "machine"},
+					Spec:       api.PodSpec{NodeName: "machine"},
 				}),
 				ModifiedIndex: 1,
 			},
@@ -645,7 +648,7 @@ func TestDeletePod(t *testing.T) {
 						Name:      "foo",
 						Namespace: api.NamespaceDefault,
 					},
-					Spec: api.PodSpec{Host: "machine"},
+					Spec: api.PodSpec{NodeName: "machine"},
 				}),
 				ModifiedIndex: 1,
 				CreatedIndex:  1,
@@ -1035,8 +1038,8 @@ func TestEtcdCreateBinding(t *testing.T) {
 			pod, err := registry.Get(ctx, validNewPod().ObjectMeta.Name)
 			if err != nil {
 				t.Errorf("%s: unexpected error: %v", k, err)
-			} else if pod.(*api.Pod).Spec.Host != test.binding.Target.Name {
-				t.Errorf("%s: expected: %v, got: %v", k, pod.(*api.Pod).Spec.Host, test.binding.Target.Name)
+			} else if pod.(*api.Pod).Spec.NodeName != test.binding.Target.Name {
+				t.Errorf("%s: expected: %v, got: %v", k, pod.(*api.Pod).Spec.NodeName, test.binding.Target.Name)
 			}
 		}
 	}
@@ -1107,7 +1110,7 @@ func TestEtcdUpdateScheduled(t *testing.T) {
 			Namespace: api.NamespaceDefault,
 		},
 		Spec: api.PodSpec{
-			Host: "machine",
+			NodeName: "machine",
 			Containers: []api.Container{
 				{
 					Name:            "foobar",
@@ -1118,6 +1121,7 @@ func TestEtcdUpdateScheduled(t *testing.T) {
 		},
 	}), 1)
 
+	grace := int64(30)
 	podIn := api.Pod{
 		ObjectMeta: api.ObjectMeta{
 			Name:            "foo",
@@ -1127,7 +1131,7 @@ func TestEtcdUpdateScheduled(t *testing.T) {
 			},
 		},
 		Spec: api.PodSpec{
-			Host: "machine",
+			NodeName: "machine",
 			Containers: []api.Container{
 				{
 					Name:                   "foobar",
@@ -1139,6 +1143,8 @@ func TestEtcdUpdateScheduled(t *testing.T) {
 			},
 			RestartPolicy: api.RestartPolicyAlways,
 			DNSPolicy:     api.DNSClusterFirst,
+
+			TerminationGracePeriodSeconds: &grace,
 		},
 	}
 	_, _, err := registry.Update(ctx, &podIn)
@@ -1170,7 +1176,7 @@ func TestEtcdUpdateStatus(t *testing.T) {
 			Namespace: api.NamespaceDefault,
 		},
 		Spec: api.PodSpec{
-			Host: "machine",
+			NodeName: "machine",
 			Containers: []api.Container{
 				{
 					Image:           "foo:v1",
@@ -1179,7 +1185,7 @@ func TestEtcdUpdateStatus(t *testing.T) {
 			},
 		},
 	}
-	fakeClient.Set(key, runtime.EncodeOrDie(latest.Codec, &podStart), 1)
+	fakeClient.Set(key, runtime.EncodeOrDie(latest.Codec, &podStart), 0)
 
 	podIn := api.Pod{
 		ObjectMeta: api.ObjectMeta{
@@ -1190,7 +1196,7 @@ func TestEtcdUpdateStatus(t *testing.T) {
 			},
 		},
 		Spec: api.PodSpec{
-			Host: "machine",
+			NodeName: "machine",
 			Containers: []api.Container{
 				{
 					Image:                  "foo:v2",
@@ -1208,6 +1214,8 @@ func TestEtcdUpdateStatus(t *testing.T) {
 
 	expected := podStart
 	expected.ResourceVersion = "2"
+	grace := int64(30)
+	expected.Spec.TerminationGracePeriodSeconds = &grace
 	expected.Spec.RestartPolicy = api.RestartPolicyAlways
 	expected.Spec.DNSPolicy = api.DNSClusterFirst
 	expected.Spec.Containers[0].ImagePullPolicy = api.PullIfNotPresent
@@ -1238,7 +1246,7 @@ func TestEtcdDeletePod(t *testing.T) {
 	key = etcdtest.AddPrefix(key)
 	fakeClient.Set(key, runtime.EncodeOrDie(latest.Codec, &api.Pod{
 		ObjectMeta: api.ObjectMeta{Name: "foo"},
-		Spec:       api.PodSpec{Host: "machine"},
+		Spec:       api.PodSpec{NodeName: "machine"},
 	}), 0)
 	_, err := registry.Delete(ctx, "foo", api.NewDeleteOptions(0))
 	if err != nil {
@@ -1260,7 +1268,7 @@ func TestEtcdDeletePodMultipleContainers(t *testing.T) {
 	key = etcdtest.AddPrefix(key)
 	fakeClient.Set(key, runtime.EncodeOrDie(latest.Codec, &api.Pod{
 		ObjectMeta: api.ObjectMeta{Name: "foo"},
-		Spec:       api.PodSpec{Host: "machine"},
+		Spec:       api.PodSpec{NodeName: "machine"},
 	}), 0)
 	_, err := registry.Delete(ctx, "foo", api.NewDeleteOptions(0))
 	if err != nil {
@@ -1330,13 +1338,13 @@ func TestEtcdList(t *testing.T) {
 					{
 						Value: runtime.EncodeOrDie(latest.Codec, &api.Pod{
 							ObjectMeta: api.ObjectMeta{Name: "foo"},
-							Spec:       api.PodSpec{Host: "machine"},
+							Spec:       api.PodSpec{NodeName: "machine"},
 						}),
 					},
 					{
 						Value: runtime.EncodeOrDie(latest.Codec, &api.Pod{
 							ObjectMeta: api.ObjectMeta{Name: "bar"},
-							Spec:       api.PodSpec{Host: "machine"},
+							Spec:       api.PodSpec{NodeName: "machine"},
 						}),
 					},
 				},
@@ -1353,8 +1361,8 @@ func TestEtcdList(t *testing.T) {
 	if len(pods.Items) != 2 || pods.Items[0].Name != "foo" || pods.Items[1].Name != "bar" {
 		t.Errorf("Unexpected pod list: %#v", pods)
 	}
-	if pods.Items[0].Spec.Host != "machine" ||
-		pods.Items[1].Spec.Host != "machine" {
+	if pods.Items[0].Spec.NodeName != "machine" ||
+		pods.Items[1].Spec.NodeName != "machine" {
 		t.Errorf("Failed to populate host name.")
 	}
 }

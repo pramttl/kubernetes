@@ -189,7 +189,7 @@ These are verbs which change the fundamental type of data returned (watch return
 
 Two additional verbs `redirect` and `proxy` provide access to cluster resources as described in [accessing-the-cluster.md](accessing-the-cluster.md).
 
-When resources wish to expose alternative actions that are closely coupled to a single resource, they should do so using new sub-resources. An example is allowing automated processes to update the "status" field of a Pod. The `/pods` endpoint only allows updates to "metadata" and "spec", since those reflect end-user intent. An automated process should be able to modify status for users to see by sending an updated Pod kind to the server to the "/pods/&lt;name&gt;/status" endpoint - the alternate endpoint allows different rules to be applied to the update, and access to be appropriately restricted. Likewise, some actions like "stop" or "resize" are best represented as REST sub-resources that are POSTed to.  The POST action may require a simple kind to be provided if the action requires parameters, or function without a request body.
+When resources wish to expose alternative actions that are closely coupled to a single resource, they should do so using new sub-resources. An example is allowing automated processes to update the "status" field of a Pod. The `/pods` endpoint only allows updates to "metadata" and "spec", since those reflect end-user intent. An automated process should be able to modify status for users to see by sending an updated Pod kind to the server to the "/pods/&lt;name&gt;/status" endpoint - the alternate endpoint allows different rules to be applied to the update, and access to be appropriately restricted. Likewise, some actions like "stop" or "scale" are best represented as REST sub-resources that are POSTed to.  The POST action may require a simple kind to be provided if the action requires parameters, or function without a request body.
 
 TODO: more documentation of Watch
 
@@ -201,7 +201,7 @@ The API supports three different PATCH operations, determined by their correspon
  * As defined in [RFC6902](https://tools.ietf.org/html/rfc6902), a JSON Patch is a sequence of operations that are executed on the resource, e.g. `{"op": "add", "path": "/a/b/c", "value": [ "foo", "bar" ]}`. For more details on how to use JSON Patch, see the RFC.
 * Merge Patch, `Content-Type: application/merge-json-patch+json`
  * As defined in [RFC7386](https://tools.ietf.org/html/rfc7386), a Merge Patch is essentially a partial representation of the resource. The submitted JSON is "merged" with the current resource to create a new one, then the new one is saved. For more details on how to use Merge Patch, see the RFC.
-* Strategic Merge Patch, `Content-Type: application/strategic-merge-json-patch+json`
+* Strategic Merge Patch, `Content-Type: application/strategic-merge-patch+json`
  * Strategic Merge Patch is a custom implementation of Merge Patch. For a detailed explanation of how it works and why it needed to be introduced, see below.
 
 #### Strategic Merge Patch
@@ -301,7 +301,7 @@ Late Initialization
 Late initialization is when resource fields are set by a system controller
 after an object is created/updated.
 
-For example, the scheduler sets the pod.spec.host field after the pod is created.
+For example, the scheduler sets the pod.spec.nodeName field after the pod is created.
 
 Late-initializers should only make the following types of modifications:
   - Setting previously unset fields

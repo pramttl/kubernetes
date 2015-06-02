@@ -43,14 +43,14 @@ for ((i=0; i < NUM_MINIONS; i++)) do
   VAGRANT_MINION_NAMES[$i]="minion-$((i+1))"
 done
 
-PORTAL_NET=10.247.0.0/16
+SERVICE_CLUSTER_IP_RANGE=10.247.0.0/16  # formerly PORTAL_NET
 
 # Since this isn't exposed on the network, default to a simple user/passwd
 MASTER_USER=vagrant
 MASTER_PASSWD=vagrant
 
 # Admission Controllers to invoke prior to persisting objects in cluster
-ADMISSION_CONTROL=NamespaceLifecycle,NamespaceAutoProvision,LimitRanger,SecurityContextDeny,ServiceAccount,ResourceQuota
+ADMISSION_CONTROL=NamespaceLifecycle,NamespaceExists,LimitRanger,SecurityContextDeny,ServiceAccount,ResourceQuota
 
 # Optional: Install node monitoring.
 ENABLE_NODE_MONITORING=true
@@ -63,8 +63,11 @@ LOGGING_DESTINATION=elasticsearch
 ENABLE_CLUSTER_LOGGING=false
 ELASTICSEARCH_LOGGING_REPLICAS=1
 
-# Optional: When set to true, heapster, Influxdb and Grafana will be setup as part of the cluster bring up.
-ENABLE_CLUSTER_MONITORING="${KUBE_ENABLE_CLUSTER_MONITORING:-true}"
+# Optional: Cluster monitoring to setup as part of the cluster bring up:
+#   none     - No cluster monitoring setup 
+#   influxdb - Heapster, InfluxDB, and Grafana 
+#   google   - Heapster, Google Cloud Monitoring, and Google Cloud Logging
+ENABLE_CLUSTER_MONITORING="${KUBE_ENABLE_CLUSTER_MONITORING:-influxdb}"
 
 # Extra options to set on the Docker command line.  This is useful for setting
 # --insecure-registry for local registries.

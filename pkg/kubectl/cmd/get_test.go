@@ -38,6 +38,7 @@ import (
 )
 
 func testData() (*api.PodList, *api.ServiceList, *api.ReplicationControllerList) {
+	grace := int64(30)
 	pods := &api.PodList{
 		ListMeta: api.ListMeta{
 			ResourceVersion: "15",
@@ -46,15 +47,17 @@ func testData() (*api.PodList, *api.ServiceList, *api.ReplicationControllerList)
 			{
 				ObjectMeta: api.ObjectMeta{Name: "foo", Namespace: "test", ResourceVersion: "10"},
 				Spec: api.PodSpec{
-					RestartPolicy: api.RestartPolicyAlways,
-					DNSPolicy:     api.DNSClusterFirst,
+					RestartPolicy:                 api.RestartPolicyAlways,
+					DNSPolicy:                     api.DNSClusterFirst,
+					TerminationGracePeriodSeconds: &grace,
 				},
 			},
 			{
 				ObjectMeta: api.ObjectMeta{Name: "bar", Namespace: "test", ResourceVersion: "11"},
 				Spec: api.PodSpec{
-					RestartPolicy: api.RestartPolicyAlways,
-					DNSPolicy:     api.DNSClusterFirst,
+					RestartPolicy:                 api.RestartPolicyAlways,
+					DNSPolicy:                     api.DNSClusterFirst,
+					TerminationGracePeriodSeconds: &grace,
 				},
 			},
 		},
@@ -155,10 +158,10 @@ func TestGetUnknownSchemaObjectListGeneric(t *testing.T) {
 		obj2   string
 	}{
 		"handles specific version": {
-			output: "v1beta3",
-			list:   "v1beta3",
+			output: "v1",
+			list:   "v1",
 			obj1:   "unlikelyversion",
-			obj2:   "v1beta3",
+			obj2:   "v1",
 		},
 		"handles second specific version": {
 			output: "unlikelyversion",
@@ -167,14 +170,14 @@ func TestGetUnknownSchemaObjectListGeneric(t *testing.T) {
 			obj2:   "v1beta3",         // version of the API response
 		},
 		"handles common version": {
-			output: "v1beta1",
-			list:   "v1beta1",
+			output: "v1beta3",
+			list:   "v1beta3",
 			obj1:   "unlikelyversion", // because test scheme defaults to unlikelyversion
-			obj2:   "v1beta1",
+			obj2:   "v1beta3",
 		},
 	}
 	for k, test := range testCases {
-		apiCodec := runtime.CodecFor(api.Scheme, "v1beta1")
+		apiCodec := runtime.CodecFor(api.Scheme, "v1beta3")
 		regularClient := &client.FakeRESTClient{
 			Codec: apiCodec,
 			Client: client.HTTPClientFunc(func(req *http.Request) (*http.Response, error) {
@@ -503,6 +506,7 @@ func TestGetMultipleTypeObjectsWithDirectReference(t *testing.T) {
 	}
 }
 func watchTestData() ([]api.Pod, []watch.Event) {
+	grace := int64(30)
 	pods := []api.Pod{
 		{
 			ObjectMeta: api.ObjectMeta{
@@ -511,8 +515,9 @@ func watchTestData() ([]api.Pod, []watch.Event) {
 				ResourceVersion: "10",
 			},
 			Spec: api.PodSpec{
-				RestartPolicy: api.RestartPolicyAlways,
-				DNSPolicy:     api.DNSClusterFirst,
+				RestartPolicy:                 api.RestartPolicyAlways,
+				DNSPolicy:                     api.DNSClusterFirst,
+				TerminationGracePeriodSeconds: &grace,
 			},
 		},
 	}
@@ -526,8 +531,9 @@ func watchTestData() ([]api.Pod, []watch.Event) {
 					ResourceVersion: "11",
 				},
 				Spec: api.PodSpec{
-					RestartPolicy: api.RestartPolicyAlways,
-					DNSPolicy:     api.DNSClusterFirst,
+					RestartPolicy:                 api.RestartPolicyAlways,
+					DNSPolicy:                     api.DNSClusterFirst,
+					TerminationGracePeriodSeconds: &grace,
 				},
 			},
 		},
@@ -540,8 +546,9 @@ func watchTestData() ([]api.Pod, []watch.Event) {
 					ResourceVersion: "12",
 				},
 				Spec: api.PodSpec{
-					RestartPolicy: api.RestartPolicyAlways,
-					DNSPolicy:     api.DNSClusterFirst,
+					RestartPolicy:                 api.RestartPolicyAlways,
+					DNSPolicy:                     api.DNSClusterFirst,
+					TerminationGracePeriodSeconds: &grace,
 				},
 			},
 		},

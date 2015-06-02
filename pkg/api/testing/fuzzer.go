@@ -88,6 +88,15 @@ func FuzzerFor(t *testing.T, version string, src rand.Source) *fuzz.Fuzzer {
 			j.LabelSelector, _ = labels.Parse("a=b")
 			j.FieldSelector, _ = fields.ParseSelector("a=b")
 		},
+		func(j *api.PodSpec, c fuzz.Continue) {
+			c.FuzzNoCustom(j)
+			// has a default value
+			ttl := int64(30)
+			if c.RandBool() {
+				ttl = int64(c.Uint32())
+			}
+			j.TerminationGracePeriodSeconds = &ttl
+		},
 		func(j *api.PodPhase, c fuzz.Continue) {
 			statuses := []api.PodPhase{api.PodPending, api.PodRunning, api.PodFailed, api.PodUnknown}
 			*j = statuses[c.Rand.Intn(len(statuses))]
@@ -106,8 +115,8 @@ func FuzzerFor(t *testing.T, version string, src rand.Source) *fuzz.Fuzzer {
 			j.Target.Name = c.RandString()
 		},
 		func(j *api.ReplicationControllerSpec, c fuzz.Continue) {
-			c.FuzzNoCustom(j)   // fuzz self without calling this function again
-			j.TemplateRef = nil // this is required for round trip
+			c.FuzzNoCustom(j) // fuzz self without calling this function again
+			//j.TemplateRef = nil // this is required for round trip
 		},
 		func(j *api.ReplicationControllerStatus, c fuzz.Continue) {
 			// only replicas round trips

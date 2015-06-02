@@ -22,16 +22,16 @@ KUBE_ROOT=$(dirname "${BASH_SOURCE}")/..
 source "${KUBE_ROOT}/hack/lib/init.sh"
 
 kube::golang::setup_env
-"${KUBE_ROOT}/hack/build-go.sh" cmd/kube-conversion
+"${KUBE_ROOT}/hack/build-go.sh" cmd/genconversion
 
-genconversion=$(kube::util::find-binary "kube-conversion")
+genconversion=$(kube::util::find-binary "genconversion")
 
 if [[ ! -x "$genconversion" ]]; then
   {
     echo "It looks as if you don't have a compiled conversion binary"
     echo
     echo "If you are running from a clone of the git repo, please run"
-    echo "'./hack/build-go.sh cmd/kube-conversion'."
+    echo "'./hack/build-go.sh cmd/genconversion'."
   } >&2
   exit 1
 fi

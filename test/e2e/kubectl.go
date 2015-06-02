@@ -88,10 +88,10 @@ var _ = Describe("kubectl", func() {
 			runKubectl("create", "-f", nautilusPath, fmt.Sprintf("--namespace=%v", ns))
 			validateController(c, nautilusImage, 2, "update-demo", updateDemoSelector, getUDData("nautilus.jpg", ns), ns)
 			By("scaling down the replication controller")
-			runKubectl("resize", "rc", "update-demo-nautilus", "--replicas=1", fmt.Sprintf("--namespace=%v", ns))
+			runKubectl("scale", "rc", "update-demo-nautilus", "--replicas=1", fmt.Sprintf("--namespace=%v", ns))
 			validateController(c, nautilusImage, 1, "update-demo", updateDemoSelector, getUDData("nautilus.jpg", ns), ns)
 			By("scaling up the replication controller")
-			runKubectl("resize", "rc", "update-demo-nautilus", "--replicas=2", fmt.Sprintf("--namespace=%v", ns))
+			runKubectl("scale", "rc", "update-demo-nautilus", "--replicas=2", fmt.Sprintf("--namespace=%v", ns))
 			validateController(c, nautilusImage, 2, "update-demo", updateDemoSelector, getUDData("nautilus.jpg", ns), ns)
 		})
 
@@ -113,8 +113,8 @@ var _ = Describe("kubectl", func() {
 		})
 
 		It("should create and stop a working application", func() {
-			if !providerIs("gce", "gke") {
-				By(fmt.Sprintf("Skipping guestbook, uses createExternalLoadBalancer, a (gce|gke) feature"))
+			if !providerIs("gce", "gke", "aws") {
+				By(fmt.Sprintf("Skipping guestbook, uses createExternalLoadBalancer, a (gce|gke|aws) feature"))
 				return
 			}
 
@@ -205,7 +205,7 @@ func getUDData(jpgExpected string, ns string) func(*client.Client, string) error
 		if strings.Contains(data.Image, jpgExpected) {
 			return nil
 		} else {
-			return errors.New(fmt.Sprintf("data served up in container is innaccurate, %s didn't contain %s", data, jpgExpected))
+			return errors.New(fmt.Sprintf("data served up in container is inaccurate, %s didn't contain %s", data, jpgExpected))
 		}
 	}
 }

@@ -257,13 +257,13 @@ func convert_api_ContainerState_To_v1_ContainerState(in *api.ContainerState, out
 	} else {
 		out.Running = nil
 	}
-	if in.Termination != nil {
-		out.Termination = new(ContainerStateTerminated)
-		if err := convert_api_ContainerStateTerminated_To_v1_ContainerStateTerminated(in.Termination, out.Termination, s); err != nil {
+	if in.Terminated != nil {
+		out.Terminated = new(ContainerStateTerminated)
+		if err := convert_api_ContainerStateTerminated_To_v1_ContainerStateTerminated(in.Terminated, out.Terminated, s); err != nil {
 			return err
 		}
 	} else {
-		out.Termination = nil
+		out.Terminated = nil
 	}
 	return nil
 }
@@ -995,6 +995,7 @@ func convert_api_NodeSpec_To_v1_NodeSpec(in *api.NodeSpec, out *NodeSpec, s conv
 	}
 	out.PodCIDR = in.PodCIDR
 	out.ExternalID = in.ExternalID
+	out.ProviderID = in.ProviderID
 	out.Unschedulable = in.Unschedulable
 	return nil
 }
@@ -1085,6 +1086,12 @@ func convert_api_ObjectMeta_To_v1_ObjectMeta(in *api.ObjectMeta, out *ObjectMeta
 		}
 	} else {
 		out.DeletionTimestamp = nil
+	}
+	if in.DeletionGracePeriodSeconds != nil {
+		out.DeletionGracePeriodSeconds = new(int64)
+		*out.DeletionGracePeriodSeconds = *in.DeletionGracePeriodSeconds
+	} else {
+		out.DeletionGracePeriodSeconds = nil
 	}
 	if in.Labels != nil {
 		out.Labels = make(map[string]string)
@@ -1311,6 +1318,14 @@ func convert_api_PersistentVolumeSource_To_v1_PersistentVolumeSource(in *api.Per
 	} else {
 		out.RBD = nil
 	}
+	if in.ISCSI != nil {
+		out.ISCSI = new(ISCSIVolumeSource)
+		if err := convert_api_ISCSIVolumeSource_To_v1_ISCSIVolumeSource(in.ISCSI, out.ISCSI, s); err != nil {
+			return err
+		}
+	} else {
+		out.ISCSI = nil
+	}
 	return nil
 }
 
@@ -1505,7 +1520,7 @@ func convert_api_PodSpec_To_v1_PodSpec(in *api.PodSpec, out *PodSpec, s conversi
 		out.NodeSelector = nil
 	}
 	out.ServiceAccount = in.ServiceAccount
-	out.Host = in.Host
+	out.NodeName = in.NodeName
 	out.HostNetwork = in.HostNetwork
 	if in.ImagePullSecrets != nil {
 		out.ImagePullSecrets = make([]LocalObjectReference, len(in.ImagePullSecrets))
@@ -2012,6 +2027,16 @@ func convert_api_ServiceAccount_To_v1_ServiceAccount(in *api.ServiceAccount, out
 	} else {
 		out.Secrets = nil
 	}
+	if in.ImagePullSecrets != nil {
+		out.ImagePullSecrets = make([]LocalObjectReference, len(in.ImagePullSecrets))
+		for i := range in.ImagePullSecrets {
+			if err := convert_api_LocalObjectReference_To_v1_LocalObjectReference(&in.ImagePullSecrets[i], &out.ImagePullSecrets[i], s); err != nil {
+				return err
+			}
+		}
+	} else {
+		out.ImagePullSecrets = nil
+	}
 	return nil
 }
 
@@ -2097,7 +2122,7 @@ func convert_api_ServiceSpec_To_v1_ServiceSpec(in *api.ServiceSpec, out *Service
 	} else {
 		out.Selector = nil
 	}
-	out.PortalIP = in.PortalIP
+	out.ClusterIP = in.ClusterIP
 	out.Type = ServiceType(in.Type)
 	if in.DeprecatedPublicIPs != nil {
 		out.DeprecatedPublicIPs = make([]string, len(in.DeprecatedPublicIPs))
@@ -2513,13 +2538,13 @@ func convert_v1_ContainerState_To_api_ContainerState(in *ContainerState, out *ap
 	} else {
 		out.Running = nil
 	}
-	if in.Termination != nil {
-		out.Termination = new(api.ContainerStateTerminated)
-		if err := convert_v1_ContainerStateTerminated_To_api_ContainerStateTerminated(in.Termination, out.Termination, s); err != nil {
+	if in.Terminated != nil {
+		out.Terminated = new(api.ContainerStateTerminated)
+		if err := convert_v1_ContainerStateTerminated_To_api_ContainerStateTerminated(in.Terminated, out.Terminated, s); err != nil {
 			return err
 		}
 	} else {
-		out.Termination = nil
+		out.Terminated = nil
 	}
 	return nil
 }
@@ -3251,6 +3276,7 @@ func convert_v1_NodeSpec_To_api_NodeSpec(in *NodeSpec, out *api.NodeSpec, s conv
 	}
 	out.PodCIDR = in.PodCIDR
 	out.ExternalID = in.ExternalID
+	out.ProviderID = in.ProviderID
 	out.Unschedulable = in.Unschedulable
 	return nil
 }
@@ -3341,6 +3367,12 @@ func convert_v1_ObjectMeta_To_api_ObjectMeta(in *ObjectMeta, out *api.ObjectMeta
 		}
 	} else {
 		out.DeletionTimestamp = nil
+	}
+	if in.DeletionGracePeriodSeconds != nil {
+		out.DeletionGracePeriodSeconds = new(int64)
+		*out.DeletionGracePeriodSeconds = *in.DeletionGracePeriodSeconds
+	} else {
+		out.DeletionGracePeriodSeconds = nil
 	}
 	if in.Labels != nil {
 		out.Labels = make(map[string]string)
@@ -3567,6 +3599,14 @@ func convert_v1_PersistentVolumeSource_To_api_PersistentVolumeSource(in *Persist
 	} else {
 		out.RBD = nil
 	}
+	if in.ISCSI != nil {
+		out.ISCSI = new(api.ISCSIVolumeSource)
+		if err := convert_v1_ISCSIVolumeSource_To_api_ISCSIVolumeSource(in.ISCSI, out.ISCSI, s); err != nil {
+			return err
+		}
+	} else {
+		out.ISCSI = nil
+	}
 	return nil
 }
 
@@ -3761,7 +3801,7 @@ func convert_v1_PodSpec_To_api_PodSpec(in *PodSpec, out *api.PodSpec, s conversi
 		out.NodeSelector = nil
 	}
 	out.ServiceAccount = in.ServiceAccount
-	out.Host = in.Host
+	out.NodeName = in.NodeName
 	out.HostNetwork = in.HostNetwork
 	if in.ImagePullSecrets != nil {
 		out.ImagePullSecrets = make([]api.LocalObjectReference, len(in.ImagePullSecrets))
@@ -4268,6 +4308,16 @@ func convert_v1_ServiceAccount_To_api_ServiceAccount(in *ServiceAccount, out *ap
 	} else {
 		out.Secrets = nil
 	}
+	if in.ImagePullSecrets != nil {
+		out.ImagePullSecrets = make([]api.LocalObjectReference, len(in.ImagePullSecrets))
+		for i := range in.ImagePullSecrets {
+			if err := convert_v1_LocalObjectReference_To_api_LocalObjectReference(&in.ImagePullSecrets[i], &out.ImagePullSecrets[i], s); err != nil {
+				return err
+			}
+		}
+	} else {
+		out.ImagePullSecrets = nil
+	}
 	return nil
 }
 
@@ -4353,7 +4403,7 @@ func convert_v1_ServiceSpec_To_api_ServiceSpec(in *ServiceSpec, out *api.Service
 	} else {
 		out.Selector = nil
 	}
-	out.PortalIP = in.PortalIP
+	out.ClusterIP = in.ClusterIP
 	out.Type = api.ServiceType(in.Type)
 	if in.DeprecatedPublicIPs != nil {
 		out.DeprecatedPublicIPs = make([]string, len(in.DeprecatedPublicIPs))

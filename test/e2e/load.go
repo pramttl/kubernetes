@@ -26,6 +26,7 @@ import (
 	"github.com/GoogleCloudPlatform/kubernetes/pkg/client"
 	"github.com/GoogleCloudPlatform/kubernetes/pkg/fields"
 	"github.com/GoogleCloudPlatform/kubernetes/pkg/labels"
+	"github.com/GoogleCloudPlatform/kubernetes/pkg/util"
 
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
@@ -67,6 +68,14 @@ var _ = Describe("Load", func() {
 		if err := c.Namespaces().Delete(ns); err != nil {
 			Failf("Couldn't delete ns %s", err)
 		}
+
+		// Verify latency metrics
+		// TODO: Update threshold to 1s once we reach this goal
+		// TODO: We should reset metrics before the test. Currently previous tests influence latency metrics.
+		_, err := HighLatencyRequests(c, 5*time.Second, util.NewStringSet("events"))
+		expectNoError(err)
+		// TODO: uncomment the following line once the test is stable
+		// Expect(highLatencyRequests).NotTo(BeNumerically(">", 0))
 	})
 
 	type Load struct {
@@ -112,20 +121,20 @@ func computeRCCounts(total int) (int, int, int) {
 	return smallRCCount, mediumRCCount, bigRCCount
 }
 
-// The function creates a RC and then every few second resize it and with 0.1 probability deletes it.
+// The function creates a RC and then every few second scale it and with 0.1 probability deletes it.
 func playWithRC(c *client.Client, wg *sync.WaitGroup, ns, name string, size int) {
 	defer GinkgoRecover()
 	defer wg.Done()
 	rcExist := false
-	// Once every 1-2 minutes perform resize of RC.
+	// Once every 1-2 minutes perform scale of RC.
 	for start := time.Now(); time.Since(start) < simulationTime; time.Sleep(time.Duration(60+rand.Intn(60)) * time.Second) {
 		if !rcExist {
 			expectNoError(RunRC(c, name, ns, image, size), fmt.Sprintf("creating rc %s in namespace %s", name, ns))
 			rcExist = true
 		}
-		// Resize RC to a random size between 0.5x and 1.5x of the original size.
+		// Scale RC to a random size between 0.5x and 1.5x of the original size.
 		newSize := uint(rand.Intn(size+1) + size/2)
-		expectNoError(ResizeRC(c, ns, name, newSize), fmt.Sprintf("resizing rc %s in namespace %s", name, ns))
+		expectNoError(ScaleRC(c, ns, name, newSize), fmt.Sprintf("scaling rc %s in namespace %s", name, ns))
 		// With probability 0.1 remove this RC.
 		if rand.Intn(10) == 0 {
 			expectNoError(DeleteRC(c, ns, name), fmt.Sprintf("deleting rc %s in namespace %s", name, ns))

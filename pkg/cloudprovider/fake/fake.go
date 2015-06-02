@@ -26,12 +26,14 @@ import (
 	"github.com/GoogleCloudPlatform/kubernetes/pkg/cloudprovider"
 )
 
+const ProviderName = "fake"
+
 // FakeBalancer is a fake storage of balancer information
 type FakeBalancer struct {
 	Name       string
 	Region     string
 	ExternalIP net.IP
-	Ports      []int
+	Ports      []*api.ServicePort
 	Hosts      []string
 }
 
@@ -81,6 +83,11 @@ func (f *FakeCloud) Clusters() (cloudprovider.Clusters, bool) {
 	return f, true
 }
 
+// ProviderName returns the cloud provider ID.
+func (f *FakeCloud) ProviderName() string {
+	return ProviderName
+}
+
 // TCPLoadBalancer returns a fake implementation of TCPLoadBalancer.
 // Actually it just returns f itself.
 func (f *FakeCloud) TCPLoadBalancer() (cloudprovider.TCPLoadBalancer, bool) {
@@ -112,7 +119,7 @@ func (f *FakeCloud) GetTCPLoadBalancer(name, region string) (*api.LoadBalancerSt
 
 // CreateTCPLoadBalancer is a test-spy implementation of TCPLoadBalancer.CreateTCPLoadBalancer.
 // It adds an entry "create" into the internal method call record.
-func (f *FakeCloud) CreateTCPLoadBalancer(name, region string, externalIP net.IP, ports []int, hosts []string, affinityType api.ServiceAffinity) (*api.LoadBalancerStatus, error) {
+func (f *FakeCloud) CreateTCPLoadBalancer(name, region string, externalIP net.IP, ports []*api.ServicePort, hosts []string, affinityType api.ServiceAffinity) (*api.LoadBalancerStatus, error) {
 	f.addCall("create")
 	f.Balancers = append(f.Balancers, FakeBalancer{name, region, externalIP, ports, hosts})
 
@@ -150,6 +157,12 @@ func (f *FakeCloud) NodeAddresses(instance string) ([]api.NodeAddress, error) {
 func (f *FakeCloud) ExternalID(instance string) (string, error) {
 	f.addCall("external-id")
 	return f.ExtID[instance], f.Err
+}
+
+// InstanceID returns the cloud provider ID of the specified instance.
+func (f *FakeCloud) InstanceID(instance string) (string, error) {
+	f.addCall("instance-id")
+	return f.ExtID[instance], nil
 }
 
 // List is a test-spy implementation of Instances.List.
