@@ -102,10 +102,6 @@ func addDefaultingFuncs() {
 			if obj.HostNetwork {
 				defaultHostNetworkPorts(&obj.Containers)
 			}
-			if obj.TerminationGracePeriodSeconds == nil {
-				period := int64(DefaultTerminationGracePeriodSeconds)
-				obj.TerminationGracePeriodSeconds = &period
-			}
 		},
 		func(obj *Probe) {
 			if obj.TimeoutSeconds == 0 {
@@ -175,6 +171,9 @@ func defaultHostNetworkPorts(containers *[]Container) {
 // defaultSecurityContext performs the downward and upward merges of a pod definition
 func defaultSecurityContext(container *Container) {
 	if container.SecurityContext == nil {
+		if (len(container.Capabilities.Add) == 0) && (len(container.Capabilities.Drop) == 0) && (container.Privileged == false) {
+			return
+		}
 		glog.V(5).Infof("creating security context for container %s", container.Name)
 		container.SecurityContext = &SecurityContext{}
 	}

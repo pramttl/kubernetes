@@ -21,6 +21,7 @@ import (
 	"testing"
 
 	"github.com/GoogleCloudPlatform/kubernetes/pkg/api"
+	"github.com/GoogleCloudPlatform/kubernetes/pkg/api/registered"
 	"github.com/GoogleCloudPlatform/kubernetes/pkg/api/testapi"
 	"github.com/GoogleCloudPlatform/kubernetes/pkg/securitycontext"
 
@@ -30,7 +31,6 @@ import (
 func noDefault(*api.Pod) error { return nil }
 
 func TestDecodeSinglePod(t *testing.T) {
-	grace := int64(30)
 	pod := &api.Pod{
 		TypeMeta: api.TypeMeta{
 			APIVersion: "",
@@ -41,9 +41,8 @@ func TestDecodeSinglePod(t *testing.T) {
 			Namespace: "mynamespace",
 		},
 		Spec: api.PodSpec{
-			RestartPolicy:                 api.RestartPolicyAlways,
-			DNSPolicy:                     api.DNSClusterFirst,
-			TerminationGracePeriodSeconds: &grace,
+			RestartPolicy: api.RestartPolicyAlways,
+			DNSPolicy:     api.DNSClusterFirst,
 			Containers: []api.Container{{
 				Name:                   "image",
 				Image:                  "test/image",
@@ -58,11 +57,6 @@ func TestDecodeSinglePod(t *testing.T) {
 		t.Errorf("unexpected error: %v", err)
 	}
 	parsed, podOut, err := tryDecodeSinglePod(json, noDefault)
-	if testapi.Version() == "v1beta1" {
-		// v1beta1 conversion leaves empty lists that should be nil
-		podOut.Spec.Containers[0].Resources.Limits = nil
-		podOut.Spec.Containers[0].Resources.Requests = nil
-	}
 	if !parsed {
 		t.Errorf("expected to have parsed file: (%s)", string(json))
 	}
@@ -73,29 +67,30 @@ func TestDecodeSinglePod(t *testing.T) {
 		t.Errorf("expected:\n%#v\ngot:\n%#v\n%s", pod, podOut, string(json))
 	}
 
-	externalPod, err := testapi.Converter().ConvertToVersion(pod, "v1beta3")
-	if err != nil {
-		t.Errorf("unexpected error: %v", err)
-	}
-	yaml, err := yaml.Marshal(externalPod)
-	if err != nil {
-		t.Errorf("unexpected error: %v", err)
-	}
+	for _, version := range registered.RegisteredVersions {
+		externalPod, err := testapi.Converter().ConvertToVersion(pod, version)
+		if err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+		yaml, err := yaml.Marshal(externalPod)
+		if err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
 
-	parsed, podOut, err = tryDecodeSinglePod(yaml, noDefault)
-	if !parsed {
-		t.Errorf("expected to have parsed file: (%s)", string(yaml))
-	}
-	if err != nil {
-		t.Errorf("unexpected error: %v (%s)", err, string(yaml))
-	}
-	if !reflect.DeepEqual(pod, podOut) {
-		t.Errorf("expected:\n%#v\ngot:\n%#v\n%s", pod, podOut, string(yaml))
+		parsed, podOut, err = tryDecodeSinglePod(yaml, noDefault)
+		if !parsed {
+			t.Errorf("expected to have parsed file: (%s)", string(yaml))
+		}
+		if err != nil {
+			t.Errorf("unexpected error: %v (%s)", err, string(yaml))
+		}
+		if !reflect.DeepEqual(pod, podOut) {
+			t.Errorf("expected:\n%#v\ngot:\n%#v\n%s", pod, podOut, string(yaml))
+		}
 	}
 }
 
 func TestDecodePodList(t *testing.T) {
-	grace := int64(30)
 	pod := &api.Pod{
 		TypeMeta: api.TypeMeta{
 			APIVersion: "",
@@ -106,9 +101,8 @@ func TestDecodePodList(t *testing.T) {
 			Namespace: "mynamespace",
 		},
 		Spec: api.PodSpec{
-			RestartPolicy:                 api.RestartPolicyAlways,
-			DNSPolicy:                     api.DNSClusterFirst,
-			TerminationGracePeriodSeconds: &grace,
+			RestartPolicy: api.RestartPolicyAlways,
+			DNSPolicy:     api.DNSClusterFirst,
 			Containers: []api.Container{{
 				Name:                   "image",
 				Image:                  "test/image",
@@ -141,23 +135,25 @@ func TestDecodePodList(t *testing.T) {
 		t.Errorf("expected:\n%#v\ngot:\n%#v\n%s", podList, &podListOut, string(json))
 	}
 
-	externalPodList, err := testapi.Converter().ConvertToVersion(podList, "v1beta3")
-	if err != nil {
-		t.Errorf("unexpected error: %v", err)
-	}
-	yaml, err := yaml.Marshal(externalPodList)
-	if err != nil {
-		t.Errorf("unexpected error: %v", err)
-	}
+	for _, version := range registered.RegisteredVersions {
+		externalPodList, err := testapi.Converter().ConvertToVersion(podList, version)
+		if err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+		yaml, err := yaml.Marshal(externalPodList)
+		if err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
 
-	parsed, podListOut, err = tryDecodePodList(yaml, noDefault)
-	if !parsed {
-		t.Errorf("expected to have parsed file: (%s)", string(yaml))
-	}
-	if err != nil {
-		t.Errorf("unexpected error: %v (%s)", err, string(yaml))
-	}
-	if !reflect.DeepEqual(podList, &podListOut) {
-		t.Errorf("expected:\n%#v\ngot:\n%#v\n%s", pod, &podListOut, string(yaml))
+		parsed, podListOut, err = tryDecodePodList(yaml, noDefault)
+		if !parsed {
+			t.Errorf("expected to have parsed file: (%s)", string(yaml))
+		}
+		if err != nil {
+			t.Errorf("unexpected error: %v (%s)", err, string(yaml))
+		}
+		if !reflect.DeepEqual(podList, &podListOut) {
+			t.Errorf("expected:\n%#v\ngot:\n%#v\n%s", pod, &podListOut, string(yaml))
+		}
 	}
 }

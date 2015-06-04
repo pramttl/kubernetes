@@ -141,7 +141,8 @@ func NewMainKubelet(
 	dockerDaemonContainer string,
 	systemContainer string,
 	configureCBR0 bool,
-	pods int) (*Kubelet, error) {
+	pods int,
+	dockerExecHandler dockertools.ExecHandler) (*Kubelet, error) {
 	if rootDirectory == "" {
 		return nil, fmt.Errorf("invalid root directory %q", rootDirectory)
 	}
@@ -278,7 +279,8 @@ func NewMainKubelet(
 			klet.networkPlugin,
 			klet,
 			klet.httpClient,
-			newKubeletRuntimeHooks(recorder))
+			newKubeletRuntimeHooks(recorder),
+			dockerExecHandler)
 	case "rkt":
 		conf := &rkt.Config{InsecureSkipVerify: true}
 		rktRuntime, err := rkt.New(
@@ -301,7 +303,7 @@ func NewMainKubelet(
 
 	// Setup container manager, can fail if the devices hierarchy is not mounted
 	// (it is required by Docker however).
-	containerManager, err := newContainerManager(dockerDaemonContainer, systemContainer)
+	containerManager, err := newContainerManager(dockerDaemonContainer, systemContainer, resourceContainer)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create the Container Manager: %v", err)
 	}
@@ -869,7 +871,7 @@ func (kl *Kubelet) GenerateRunContainerOptions(pod *api.Pod, container *api.Cont
 	return opts, nil
 }
 
-var masterServices = util.NewStringSet("kubernetes", "kubernetes-ro")
+var masterServices = util.NewStringSet("kubernetes")
 
 // getServiceEnvVarMap makes a map[string]string of env vars for services a pod in namespace ns should see
 func (kl *Kubelet) getServiceEnvVarMap(ns string) (map[string]string, error) {
@@ -906,8 +908,7 @@ func (kl *Kubelet) getServiceEnvVarMap(ns string) (map[string]string, error) {
 			serviceMap[serviceName] = service
 		case kl.masterServiceNamespace:
 			if masterServices.Has(serviceName) {
-				_, exists := serviceMap[serviceName]
-				if !exists {
+				if _, exists := serviceMap[serviceName]; !exists {
 					serviceMap[serviceName] = service
 				}
 			}
@@ -1014,8 +1015,9 @@ func (kl *Kubelet) getClusterDNS(pod *api.Pod) ([]string, []string, error) {
 		dns = append([]string{kl.clusterDNS.String()}, hostDNS...)
 	}
 	if kl.clusterDomain != "" {
-		nsDomain := fmt.Sprintf("%s.%s", pod.Namespace, kl.clusterDomain)
-		dnsSearch = append([]string{nsDomain, kl.clusterDomain}, hostSearch...)
+		nsSvcDomain := fmt.Sprintf("%s.svc.%s", pod.Namespace, kl.clusterDomain)
+		svcDomain := fmt.Sprintf("svc.%s", kl.clusterDomain)
+		dnsSearch = append([]string{nsSvcDomain, svcDomain, kl.clusterDomain}, hostSearch...)
 	}
 	return dns, dnsSearch, nil
 }
@@ -1054,8 +1056,8 @@ func parseResolvConf(reader io.Reader) (nameservers []string, searches []string,
 }
 
 // Kill all running containers in a pod (includes the pod infra container).
-func (kl *Kubelet) killPod(pod *api.Pod, runningPod kubecontainer.Pod) error {
-	return kl.containerRuntime.KillPod(pod, runningPod)
+func (kl *Kubelet) killPod(pod kubecontainer.Pod) error {
+	return kl.containerRuntime.KillPod(pod)
 }
 
 type empty struct{}
@@ -1101,7 +1103,7 @@ func (kl *Kubelet) syncPod(pod *api.Pod, mirrorPod *api.Pod, runningPod kubecont
 	// Kill pods we can't run.
 	err := canRunPod(pod)
 	if err != nil {
-		kl.killPod(pod, runningPod)
+		kl.killPod(runningPod)
 		return err
 	}
 
@@ -1416,7 +1418,7 @@ func (kl *Kubelet) killUnwantedPods(desiredPods map[types.UID]empty,
 			}()
 			glog.V(1).Infof("Killing unwanted pod %q", pod.Name)
 			// Stop the containers.
-			err = kl.killPod(nil, *pod)
+			err = kl.killPod(*pod)
 			if err != nil {
 				glog.Errorf("Failed killing the pod %q: %v", pod.Name, err)
 				return

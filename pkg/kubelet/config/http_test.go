@@ -27,7 +27,6 @@ import (
 	"github.com/GoogleCloudPlatform/kubernetes/pkg/api/validation"
 	"github.com/GoogleCloudPlatform/kubernetes/pkg/kubelet"
 	"github.com/GoogleCloudPlatform/kubernetes/pkg/runtime"
-	"github.com/GoogleCloudPlatform/kubernetes/pkg/securitycontext"
 	"github.com/GoogleCloudPlatform/kubernetes/pkg/util"
 	"github.com/GoogleCloudPlatform/kubernetes/pkg/util/errors"
 )
@@ -120,7 +119,6 @@ func TestExtractInvalidManifest(t *testing.T) {
 func TestExtractPodsFromHTTP(t *testing.T) {
 	hostname := "different-value"
 
-	grace := int64(30)
 	var testCases = []struct {
 		desc     string
 		pods     runtime.Object
@@ -154,17 +152,15 @@ func TestExtractPodsFromHTTP(t *testing.T) {
 						SelfLink: getSelfLink("foo-"+hostname, "mynamespace"),
 					},
 					Spec: api.PodSpec{
-						NodeName:                      hostname,
-						RestartPolicy:                 api.RestartPolicyAlways,
-						DNSPolicy:                     api.DNSClusterFirst,
-						TerminationGracePeriodSeconds: &grace,
-
+						NodeName:      hostname,
+						RestartPolicy: api.RestartPolicyAlways,
+						DNSPolicy:     api.DNSClusterFirst,
 						Containers: []api.Container{{
 							Name:  "1",
 							Image: "foo",
 							TerminationMessagePath: "/dev/termination-log",
 							ImagePullPolicy:        "Always",
-							SecurityContext:        securitycontext.ValidSecurityContextWithContainerDefaults()}},
+						}},
 					},
 				}),
 		},
@@ -209,17 +205,15 @@ func TestExtractPodsFromHTTP(t *testing.T) {
 						SelfLink: getSelfLink("foo-"+hostname, kubelet.NamespaceDefault),
 					},
 					Spec: api.PodSpec{
-						NodeName:                      hostname,
-						RestartPolicy:                 api.RestartPolicyAlways,
-						DNSPolicy:                     api.DNSClusterFirst,
-						TerminationGracePeriodSeconds: &grace,
-
+						NodeName:      hostname,
+						RestartPolicy: api.RestartPolicyAlways,
+						DNSPolicy:     api.DNSClusterFirst,
 						Containers: []api.Container{{
 							Name:  "1",
 							Image: "foo",
 							TerminationMessagePath: "/dev/termination-log",
 							ImagePullPolicy:        "Always",
-							SecurityContext:        securitycontext.ValidSecurityContextWithContainerDefaults()}},
+						}},
 					},
 				},
 				&api.Pod{
@@ -231,17 +225,15 @@ func TestExtractPodsFromHTTP(t *testing.T) {
 						SelfLink: getSelfLink("bar-"+hostname, kubelet.NamespaceDefault),
 					},
 					Spec: api.PodSpec{
-						NodeName:                      hostname,
-						RestartPolicy:                 api.RestartPolicyAlways,
-						DNSPolicy:                     api.DNSClusterFirst,
-						TerminationGracePeriodSeconds: &grace,
-
+						NodeName:      hostname,
+						RestartPolicy: api.RestartPolicyAlways,
+						DNSPolicy:     api.DNSClusterFirst,
 						Containers: []api.Container{{
 							Name:  "2",
 							Image: "bar",
 							TerminationMessagePath: "/dev/termination-log",
 							ImagePullPolicy:        "IfNotPresent",
-							SecurityContext:        securitycontext.ValidSecurityContextWithContainerDefaults()}},
+						}},
 					},
 				}),
 		},

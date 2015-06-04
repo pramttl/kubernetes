@@ -37,12 +37,9 @@ import (
 	"io/ioutil"
 	"log"
 	"math/rand"
-	"net"
 	"net/http"
 	"os"
-	"os/signal"
 	"sync"
-	"syscall"
 	"time"
 
 	"github.com/GoogleCloudPlatform/kubernetes/pkg/client"
@@ -50,11 +47,10 @@ import (
 )
 
 var (
-	port          = flag.Int("port", 8080, "Port number to serve at.")
-	peerCount     = flag.Int("peers", 8, "Must find at least this many peers for the test to pass.")
-	service       = flag.String("service", "nettest", "Service to find other network test pods in.")
-	namespace     = flag.String("namespace", "default", "Namespace of this pod. TODO: kubernetes should make this discoverable.")
-	delayShutdown = flag.Int("delay-shutdown", 0, "Number of seconds to delay shutdown when receiving SIGTERM.")
+	port      = flag.Int("port", 8080, "Port number to serve at.")
+	peerCount = flag.Int("peers", 8, "Must find at least this many peers for the test to pass.")
+	service   = flag.String("service", "nettest", "Service to find other network test pods in.")
+	namespace = flag.String("namespace", "default", "Namespace of this pod. TODO: kubernetes should make this discoverable.")
 )
 
 // State tracks the internal state of our little http server.
@@ -182,17 +178,6 @@ func main() {
 		log.Fatalf("Error getting hostname: %v", err)
 	}
 
-	if *delayShutdown > 0 {
-		termCh := make(chan os.Signal)
-		signal.Notify(termCh, syscall.SIGTERM)
-		go func() {
-			<-termCh
-			log.Printf("Sleeping %d seconds before exit ...", *delayShutdown)
-			time.Sleep(time.Duration(*delayShutdown) * time.Second)
-			os.Exit(0)
-		}()
-	}
-
 	state := State{
 		Hostname:             hostname,
 		StillContactingPeers: true,
@@ -216,20 +201,11 @@ func main() {
 // Find all sibling pods in the service and post to their /write handler.
 func contactOthers(state *State) {
 	defer state.doneContactingPeers()
-	token, err := ioutil.ReadFile("/var/run/secrets/kubernetes.io/serviceaccount/token")
+	client, err := client.NewInCluster()
 	if err != nil {
-		log.Fatalf("Unable to read service account token: %v", err)
+		log.Fatalf("Unable to create client; error: %v\n", err)
 	}
-	cc := client.Config{
-		Host:        "https://" + net.JoinHostPort(os.Getenv("KUBERNETES_SERVICE_HOST"), os.Getenv("KUBERNETES_SERVICE_PORT")),
-		Version:     "v1beta3",
-		BearerToken: string(token),
-		Insecure:    true, // TOOD: package certs along with the token
-	}
-	client, err := client.New(&cc)
-	if err != nil {
-		log.Fatalf("Unable to create client:\nconfig: %#v\nerror: %v\n", err)
-	}
+	// Double check that that worked by getting the server version.
 	if v, err := client.ServerVersion(); err != nil {
 		log.Fatalf("Unable to get server version: %v\n", err)
 	} else {

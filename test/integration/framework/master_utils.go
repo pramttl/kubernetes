@@ -184,7 +184,7 @@ func StopRC(rc *api.ReplicationController, restClient *client.Client) error {
 	if err != nil || reaper == nil {
 		return err
 	}
-	_, err = reaper.Stop(rc.Namespace, rc.Name, nil)
+	_, err = reaper.Stop(rc.Namespace, rc.Name, 0, nil)
 	if err != nil {
 		return err
 	}
@@ -272,6 +272,7 @@ func RunAMaster(t *testing.T) (*master.Master, *httptest.Server) {
 		APIPrefix:         "/api",
 		Authorizer:        apiserver.NewAlwaysAllowAuthorizer(),
 		AdmissionControl:  admit.NewAlwaysAdmit(),
+		EnableV1:          true,
 	})
 
 	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {

@@ -75,6 +75,7 @@ func TestUnschedulableNodes(t *testing.T) {
 		APIPrefix:             "/api",
 		Authorizer:            apiserver.NewAlwaysAllowAuthorizer(),
 		AdmissionControl:      admit.NewAlwaysAdmit(),
+		EnableV1:              true,
 	})
 
 	restClient := client.NewOrDie(&client.Config{Host: s.URL, Version: testapi.Version()})
@@ -277,7 +278,7 @@ func DoTestUnschedulableNodes(t *testing.T, restClient *client.Client, nodeStore
 			t.Logf("Test %d: Pod got scheduled on a schedulable node", i)
 		}
 
-		err = restClient.Pods(api.NamespaceDefault).Delete(myPod.Name, api.NewDeleteOptions(0))
+		err = restClient.Pods(api.NamespaceDefault).Delete(myPod.Name, nil)
 		if err != nil {
 			t.Errorf("Failed to delete pod: %v", err)
 		}

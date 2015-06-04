@@ -88,7 +88,7 @@ func (*fakeOptionGenerator) GenerateRunContainerOptions(pod *api.Pod, container 
 	return &kubecontainer.RunContainerOptions{}, nil
 }
 
-func newTestDockerManager() (*DockerManager, *FakeDockerClient) {
+func newTestDockerManagerWithHTTPClient(fakeHTTPClient *fakeHTTP) (*DockerManager, *FakeDockerClient) {
 	fakeDocker := &FakeDockerClient{VersionInfo: docker.Env{"Version=1.1.3", "ApiVersion=1.15"}, Errors: make(map[string]error), RemovedImages: util.StringSet{}}
 	fakeRecorder := &record.FakeRecorder{}
 	readinessManager := kubecontainer.NewReadinessManager()
@@ -106,10 +106,14 @@ func newTestDockerManager() (*DockerManager, *FakeDockerClient) {
 		kubecontainer.FakeOS{},
 		networkPlugin,
 		optionGenerator,
-		&fakeHTTP{},
+		fakeHTTPClient,
 		runtimeHooks)
 
 	return dockerManager, fakeDocker
+}
+
+func newTestDockerManager() (*DockerManager, *FakeDockerClient) {
+	return newTestDockerManagerWithHTTPClient(&fakeHTTP{})
 }
 
 func matchString(t *testing.T, pattern, str string) bool {
@@ -417,7 +421,7 @@ func TestKillContainerInPod(t *testing.T) {
 		manager.readinessManager.SetReadiness(c.ID, true)
 	}
 
-	if err := manager.KillContainerInPod("", &pod.Spec.Containers[0], pod); err != nil {
+	if err := manager.KillContainerInPod(pod.Spec.Containers[0], pod); err != nil {
 		t.Errorf("unexpected error: %v", err)
 	}
 	// Assert the container has been stopped.
@@ -490,14 +494,14 @@ func TestKillContainerInPodWithPreStop(t *testing.T) {
 		manager.readinessManager.SetReadiness(c.ID, true)
 	}
 
-	if err := manager.KillContainerInPod("", &pod.Spec.Containers[0], pod); err != nil {
+	if err := manager.KillContainerInPod(pod.Spec.Containers[0], pod); err != nil {
 		t.Errorf("unexpected error: %v", err)
 	}
 	// Assert the container has been stopped.
 	if err := fakeDocker.AssertStopped([]string{containerToKill.ID}); err != nil {
 		t.Errorf("container was not stopped correctly: %v", err)
 	}
-	verifyCalls(t, fakeDocker, []string{"list", "create_exec", "start_exec", "stop"})
+	verifyCalls(t, fakeDocker, []string{"list", "inspect_container", "create_exec", "start_exec", "stop"})
 	if !reflect.DeepEqual(expectedCmd, fakeDocker.execCmd) {
 		t.Errorf("expected: %v, got %v", expectedCmd, fakeDocker.execCmd)
 	}
@@ -534,7 +538,7 @@ func TestKillContainerInPodWithError(t *testing.T) {
 		manager.readinessManager.SetReadiness(c.ID, true)
 	}
 
-	if err := manager.KillContainerInPod("", &pod.Spec.Containers[0], pod); err == nil {
+	if err := manager.KillContainerInPod(pod.Spec.Containers[0], pod); err == nil {
 		t.Errorf("expected error, found nil")
 	}
 
@@ -1030,7 +1034,7 @@ func TestSyncPodDeletesWithNoPodInfraContainer(t *testing.T) {
 
 	verifyCalls(t, fakeDocker, []string{
 		// Kill the container since pod infra container is not running.
-		"stop",
+		"inspect_container", "stop",
 		// Create pod infra container.
 		"create", "start", "inspect_container",
 		// Create container.
@@ -1105,7 +1109,7 @@ func TestSyncPodDeletesDuplicate(t *testing.T) {
 		// Check the pod infra container.
 		"inspect_container",
 		// Kill the duplicated container.
-		"stop",
+		"inspect_container", "stop",
 	})
 	// Expect one of the duplicates to be killed.
 	if len(fakeDocker.Stopped) != 1 || (fakeDocker.Stopped[0] != "1234" && fakeDocker.Stopped[0] != "4567") {
@@ -1159,7 +1163,7 @@ func TestSyncPodBadHash(t *testing.T) {
 		// Check the pod infra container.
 		"inspect_container",
 		// Kill and restart the bad hash container.
-		"stop", "create", "start",
+		"inspect_container", "stop", "create", "start",
 	})
 
 	if err := fakeDocker.AssertStopped([]string{"1234"}); err != nil {
@@ -1217,7 +1221,7 @@ func TestSyncPodsUnhealthy(t *testing.T) {
 		// Check the pod infra container.
 		"inspect_container",
 		// Kill the unhealthy container.
-		"stop",
+		"inspect_container", "stop",
 		// Restart the unhealthy container.
 		"create", "start",
 	})
@@ -1426,7 +1430,7 @@ func TestSyncPodWithRestartPolicy(t *testing.T) {
 				// Check the pod infra container.
 				"inspect_container",
 				// Stop the last pod infra container.
-				"stop",
+				"inspect_container", "stop",
 			},
 			[]string{},
 			[]string{"9876"},
@@ -1778,4 +1782,133 @@ func TestGetRestartCount(t *testing.T) {
 	// (i.e., remain the same).
 	fakeDocker.ExitedContainerList = []docker.APIContainers{}
 	verifyRestartCount(&pod, 2)
+}
+
+func TestSyncPodWithPodInfraCreatesContainerCallsHandler(t *testing.T) {
+	fakeHTTPClient := &fakeHTTP{}
+	dm, fakeDocker := newTestDockerManagerWithHTTPClient(fakeHTTPClient)
+
+	pod := &api.Pod{
+		ObjectMeta: api.ObjectMeta{
+			UID:       "12345678",
+			Name:      "foo",
+			Namespace: "new",
+		},
+		Spec: api.PodSpec{
+			Containers: []api.Container{
+				{
+					Name: "bar",
+					Lifecycle: &api.Lifecycle{
+						PostStart: &api.Handler{
+							HTTPGet: &api.HTTPGetAction{
+								Host: "foo",
+								Port: util.IntOrString{IntVal: 8080, Kind: util.IntstrInt},
+								Path: "bar",
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+	fakeDocker.ContainerList = []docker.APIContainers{
+		{
+			// pod infra container
+			Names: []string{"/k8s_POD." + strconv.FormatUint(generatePodInfraContainerHash(pod), 16) + "_foo_new_12345678_0"},
+			ID:    "9876",
+		},
+	}
+	fakeDocker.ContainerMap = map[string]*docker.Container{
+		"9876": {
+			ID:         "9876",
+			Config:     &docker.Config{},
+			HostConfig: &docker.HostConfig{},
+		},
+	}
+
+	runSyncPod(t, dm, fakeDocker, pod)
+
+	verifyCalls(t, fakeDocker, []string{
+		// Check the pod infra container.
+		"inspect_container",
+		// Create container.
+		"create", "start",
+	})
+
+	fakeDocker.Lock()
+	if len(fakeDocker.Created) != 1 ||
+		!matchString(t, "k8s_bar\\.[a-f0-9]+_foo_new_", fakeDocker.Created[0]) {
+		t.Errorf("Unexpected containers created %v", fakeDocker.Created)
+	}
+	fakeDocker.Unlock()
+	if fakeHTTPClient.url != "http://foo:8080/bar" {
+		t.Errorf("Unexpected handler: %q", fakeHTTPClient.url)
+	}
+}
+
+func TestSyncPodEventHandlerFails(t *testing.T) {
+	// Simulate HTTP failure.
+	fakeHTTPClient := &fakeHTTP{err: fmt.Errorf("test error")}
+	dm, fakeDocker := newTestDockerManagerWithHTTPClient(fakeHTTPClient)
+
+	pod := &api.Pod{
+		ObjectMeta: api.ObjectMeta{
+			UID:       "12345678",
+			Name:      "foo",
+			Namespace: "new",
+		},
+		Spec: api.PodSpec{
+			Containers: []api.Container{
+				{Name: "bar",
+					Lifecycle: &api.Lifecycle{
+						PostStart: &api.Handler{
+							HTTPGet: &api.HTTPGetAction{
+								Host: "does.no.exist",
+								Port: util.IntOrString{IntVal: 8080, Kind: util.IntstrInt},
+								Path: "bar",
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	fakeDocker.ContainerList = []docker.APIContainers{
+		{
+			// pod infra container
+			Names: []string{"/k8s_POD." + strconv.FormatUint(generatePodInfraContainerHash(pod), 16) + "_foo_new_12345678_42"},
+			ID:    "9876",
+		},
+	}
+	fakeDocker.ContainerMap = map[string]*docker.Container{
+		"9876": {
+			ID:         "9876",
+			Config:     &docker.Config{},
+			HostConfig: &docker.HostConfig{},
+		},
+	}
+
+	runSyncPod(t, dm, fakeDocker, pod)
+
+	verifyCalls(t, fakeDocker, []string{
+		// Check the pod infra container.
+		"inspect_container",
+		// Create the container.
+		"create", "start",
+		// Kill the container since event handler fails.
+		"inspect_container", "stop",
+	})
+
+	// TODO(yifan): Check the stopped container's name.
+	if len(fakeDocker.Stopped) != 1 {
+		t.Fatalf("Wrong containers were stopped: %v", fakeDocker.Stopped)
+	}
+	dockerName, _, err := ParseDockerName(fakeDocker.Stopped[0])
+	if err != nil {
+		t.Errorf("Unexpected error: %v", err)
+	}
+	if dockerName.ContainerName != "bar" {
+		t.Errorf("Wrong stopped container, expected: bar, get: %q", dockerName.ContainerName)
+	}
 }

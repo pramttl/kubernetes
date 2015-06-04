@@ -50,6 +50,12 @@ function ensure-install-dir() {
   cd ${INSTALL_DIR}
 }
 
+function salt-apiserver-timeout-grain() {
+    cat <<EOF >>/etc/salt/minion.d/grains.conf
+  minRequestTimeout: '$1'
+EOF
+}
+
 function set-broken-motd() {
   echo -e '\nBroken (or in progress) GCE Kubernetes node setup! Suggested first step:\n  tail /var/log/startupscript.log\n' > /etc/motd
 }
@@ -77,13 +83,6 @@ import pipes,sys,yaml
 for k,v in yaml.load(sys.stdin).iteritems():
   print "readonly {var}={value}".format(var = k, value = pipes.quote(str(v)))
 ''' < "${kube_env_yaml}")
-
-  # Infer master status from hostname
-  if [[ $(hostname) == "${INSTANCE_PREFIX}-master" ]]; then
-    KUBERNETES_MASTER="true"
-  else
-    KUBERNETES_MASTER="false"
-  fi
 }
 
 function remove-docker-artifacts() {
@@ -494,8 +493,10 @@ EOF
 token-url = ${TOKEN_URL}
 project-id = ${PROJECT_ID}
 EOF
+    EXTERNAL_IP=$(curl --fail --silent -H 'Metadata-Flavor: Google' "http://metadata/computeMetadata/v1/instance/network-interfaces/0/access-configs/0/external-ip")
     cat <<EOF >>/etc/salt/minion.d/grains.conf
   cloud_config: /etc/gce.conf
+  advertise_address: '${EXTERNAL_IP}'
 EOF
   fi
 }
@@ -543,6 +544,9 @@ function configure-salt() {
   salt-run-local
   if [[ "${KUBERNETES_MASTER}" == "true" ]]; then
     salt-master-role
+    if [ -n "${KUBE_APISERVER_REQUEST_TIMEOUT:-}"  ]; then
+        salt-apiserver-timeout-grain $KUBE_APISERVER_REQUEST_TIMEOUT
+    fi
   else
     salt-node-role
     salt-docker-opts

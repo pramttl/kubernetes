@@ -252,16 +252,6 @@ func ValidateObjectMetaUpdate(old, meta *api.ObjectMeta) errs.ValidationErrorLis
 	} else {
 		meta.CreationTimestamp = old.CreationTimestamp
 	}
-	// an object can never remove a deletion timestamp or clear/change grace period seconds
-	if !old.DeletionTimestamp.IsZero() {
-		meta.DeletionTimestamp = old.DeletionTimestamp
-	}
-	if old.DeletionGracePeriodSeconds != nil && meta.DeletionGracePeriodSeconds == nil {
-		meta.DeletionGracePeriodSeconds = old.DeletionGracePeriodSeconds
-	}
-	if meta.DeletionGracePeriodSeconds != nil && *meta.DeletionGracePeriodSeconds != *old.DeletionGracePeriodSeconds {
-		allErrs = append(allErrs, errs.NewFieldInvalid("deletionGracePeriodSeconds", meta.DeletionGracePeriodSeconds, "field is immutable; may only be changed via deletion"))
-	}
 
 	// Reject updates that don't specify a resource version
 	if meta.ResourceVersion == "" {
@@ -1602,10 +1592,23 @@ func validateEndpointSubsets(subsets []api.EndpointSubset) errs.ValidationErrorL
 	return allErrs
 }
 
+var linkLocalNet *net.IPNet
+
 func validateEndpointAddress(address *api.EndpointAddress) errs.ValidationErrorList {
+	if linkLocalNet == nil {
+		var err error
+		_, linkLocalNet, err = net.ParseCIDR("169.254.0.0/16")
+		if err != nil {
+			glog.Errorf("Failed to parse link-local CIDR: %v", err)
+		}
+	}
+
 	allErrs := errs.ValidationErrorList{}
 	if !util.IsValidIPv4(address.IP) {
 		allErrs = append(allErrs, errs.NewFieldInvalid("ip", address.IP, "invalid IPv4 address"))
+	}
+	if linkLocalNet.Contains(net.ParseIP(address.IP)) {
+		allErrs = append(allErrs, errs.NewFieldInvalid("ip", address.IP, "may not be in the link-local range (169.254.0.0/16)"))
 	}
 	return allErrs
 }

@@ -45,12 +45,17 @@ KUBELET_TOKEN: $(yaml-quote ${KUBELET_TOKEN:-})
 KUBE_PROXY_TOKEN: $(yaml-quote ${KUBE_PROXY_TOKEN:-})
 ADMISSION_CONTROL: $(yaml-quote ${ADMISSION_CONTROL:-})
 MASTER_IP_RANGE: $(yaml-quote ${MASTER_IP_RANGE})
-CA_CERT: $(yaml-quote ${CA_CERT_BASE64})
+CA_CERT: $(yaml-quote ${CA_CERT_BASE64:-})
 EOF
-
+  if [ -n "${KUBE_APISERVER_REQUEST_TIMEOUT:-}"  ]; then
+    cat >>$file <<EOF
+KUBE_APISERVER_REQUEST_TIMEOUT: $(yaml-quote ${KUBE_APISERVER_REQUEST_TIMEOUT})
+EOF
+  fi
   if [[ "${master}" == "true" ]]; then
     # Master-only env vars.
     cat >>$file <<EOF
+KUBERNETES_MASTER: "true"
 KUBE_USER: $(yaml-quote ${KUBE_USER})
 KUBE_PASSWORD: $(yaml-quote ${KUBE_PASSWORD})
 KUBE_BEARER_TOKEN: $(yaml-quote ${KUBE_BEARER_TOKEN})
@@ -62,6 +67,7 @@ EOF
   else
     # Node-only env vars.
     cat >>$file <<EOF
+KUBERNETES_MASTER: "false"
 KUBERNETES_MASTER_NAME: $(yaml-quote ${MASTER_NAME})
 ZONE: $(yaml-quote ${ZONE})
 EXTRA_DOCKER_OPTS: $(yaml-quote ${EXTRA_DOCKER_OPTS})

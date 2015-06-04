@@ -93,6 +93,7 @@ kube::log::status "Starting kube-apiserver"
   --public_address_override="127.0.0.1" \
   --kubelet_port=${KUBELET_PORT} \
   --runtime_config=api/v1beta3 \
+  --runtime_config=api/v1 \
   --cert_dir="${TMPDIR:-/tmp/}" \
   --service-cluster-ip-range="10.0.0.0/24" 1>&2 &
 APISERVER_PID=$!
@@ -115,6 +116,7 @@ PATH="${KUBE_OUTPUT_HOSTBIN}":$PATH
 kube_api_versions=(
   ""
   v1beta3
+  v1
 )
 for version in "${kube_api_versions[@]}"; do
   if [[ -z "${version}" ]]; then
@@ -138,15 +140,6 @@ for version in "${kube_api_versions[@]}"; do
   rc_status_replicas_field=".status.replicas"
   rc_container_image_field=".spec.template.spec.containers"
   port_field="(index .spec.ports 0).port"
-  if [ "${version}" = "v1beta1" ] || [ "${version}" = "v1beta2" ]; then
-    id_field=".id"
-    labels_field=".labels"
-    service_selector_field=".selector"
-    rc_replicas_field=".desiredState.replicas"
-    rc_status_replicas_field=".currentState.replicas"
-    rc_container_image_field=".desiredState.podTemplate.desiredState.manifest.containers"
-    port_field=".port"
-  fi
 
   # Passing no arguments to create is an error
   ! kubectl create
@@ -179,11 +172,6 @@ for version in "${kube_api_versions[@]}"; do
   kube::test::get_object_assert pods "{{range.items}}{{$id_field}}:{{end}}" 'valid-pod:'
   # Command
   kubectl delete pod valid-pod "${kube_flags[@]}"
-  # Post-condition: pod is still there, in terminating
-  kube::test::get_object_assert pods "{{range.items}}{{$id_field}}:{{end}}" 'valid-pod:'
-  [[ "$(kubectl get pods "${kube_flags[@]}" | grep Terminating)" ]]
-  # Command
-  kubectl delete pod valid-pod "${kube_flags[@]}" --grace-period=0
   # Post-condition: no POD is running
   kube::test::get_object_assert pods "{{range.items}}{{$id_field}}:{{end}}" ''
 
@@ -199,7 +187,7 @@ for version in "${kube_api_versions[@]}"; do
   # Pre-condition: valid-pod POD is running
   kube::test::get_object_assert pods "{{range.items}}{{$id_field}}:{{end}}" 'valid-pod:'
   # Command
-  kubectl delete -f examples/limitrange/valid-pod.json "${kube_flags[@]}" --grace-period=0
+  kubectl delete -f examples/limitrange/valid-pod.json "${kube_flags[@]}"
   # Post-condition: no POD is running
   kube::test::get_object_assert pods "{{range.items}}{{$id_field}}:{{end}}" ''
 
@@ -215,7 +203,7 @@ for version in "${kube_api_versions[@]}"; do
   # Pre-condition: valid-pod POD is running
   kube::test::get_object_assert "pods -l'name in (valid-pod)'" '{{range.items}}{{$id_field}}:{{end}}' 'valid-pod:'
   # Command
-  kubectl delete pods -l'name in (valid-pod)' "${kube_flags[@]}" --grace-period=0
+  kubectl delete pods -l'name in (valid-pod)' "${kube_flags[@]}"
   # Post-condition: no POD is running
   kube::test::get_object_assert "pods -l'name in (valid-pod)'" '{{range.items}}{{$id_field}}:{{end}}' ''
 
@@ -247,7 +235,7 @@ for version in "${kube_api_versions[@]}"; do
   # Pre-condition: valid-pod POD is running
   kube::test::get_object_assert pods "{{range.items}}{{$id_field}}:{{end}}" 'valid-pod:'
   # Command
-  kubectl delete --all pods "${kube_flags[@]}" --grace-period=0 # --all remove all the pods
+  kubectl delete --all pods "${kube_flags[@]}" # --all remove all the pods
   # Post-condition: no POD is running
   kube::test::get_object_assert "pods -l'name in (valid-pod)'" '{{range.items}}{{$id_field}}:{{end}}' ''
 
@@ -264,7 +252,7 @@ for version in "${kube_api_versions[@]}"; do
   # Pre-condition: valid-pod and redis-proxy PODs are running
   kube::test::get_object_assert pods "{{range.items}}{{$id_field}}:{{end}}" 'redis-proxy:valid-pod:'
   # Command
-  kubectl delete pods valid-pod redis-proxy "${kube_flags[@]}" --grace-period=0 # delete multiple pods at once
+  kubectl delete pods valid-pod redis-proxy "${kube_flags[@]}" # delete multiple pods at once
   # Post-condition: no POD is running
   kube::test::get_object_assert pods "{{range.items}}{{$id_field}}:{{end}}" ''
 
@@ -281,7 +269,7 @@ for version in "${kube_api_versions[@]}"; do
   # Pre-condition: valid-pod and redis-proxy PODs are running
   kube::test::get_object_assert pods "{{range.items}}{{$id_field}}:{{end}}" 'redis-proxy:valid-pod:'
   # Command
-  kubectl stop pods valid-pod redis-proxy "${kube_flags[@]}" --grace-period=0 # stop multiple pods at once
+  kubectl stop pods valid-pod redis-proxy "${kube_flags[@]}" # stop multiple pods at once
   # Post-condition: no POD is running
   kube::test::get_object_assert pods "{{range.items}}{{$id_field}}:{{end}}" ''
 
@@ -305,7 +293,7 @@ for version in "${kube_api_versions[@]}"; do
   # Pre-condition: valid-pod POD is running
   kube::test::get_object_assert pods "{{range.items}}{{$id_field}}:{{end}}" 'valid-pod:'
   # Command
-  kubectl delete pods -lnew-name=new-valid-pod --grace-period=0 "${kube_flags[@]}"
+  kubectl delete pods -lnew-name=new-valid-pod "${kube_flags[@]}"
   # Post-condition: no POD is running
   kube::test::get_object_assert pods "{{range.items}}{{$id_field}}:{{end}}" ''
 
@@ -337,7 +325,7 @@ for version in "${kube_api_versions[@]}"; do
   # Pre-condition: valid-pod POD is running
   kube::test::get_object_assert pods "{{range.items}}{{$id_field}}:{{end}}" 'valid-pod:'
   # Command
-  kubectl delete pods -l'name in (valid-pod-super-sayan)' --grace-period=0 "${kube_flags[@]}"
+  kubectl delete pods -l'name in (valid-pod-super-sayan)' "${kube_flags[@]}"
   # Post-condition: no POD is running
   kube::test::get_object_assert pods "{{range.items}}{{$id_field}}:{{end}}" ''
 
@@ -358,7 +346,7 @@ for version in "${kube_api_versions[@]}"; do
   # Pre-condition: valid-pod POD is running
   kube::test::get_object_assert 'pods --namespace=other' "{{range.items}}{{$id_field}}:{{end}}" 'valid-pod:'
   # Command
-  kubectl delete "${kube_flags[@]}" pod --namespace=other valid-pod --grace-period=0
+  kubectl delete "${kube_flags[@]}" pod --namespace=other valid-pod
   # Post-condition: no POD is running
   kube::test::get_object_assert 'pods --namespace=other' "{{range.items}}{{$id_field}}:{{end}}" ''
 
@@ -399,11 +387,11 @@ for version in "${kube_api_versions[@]}"; do
 
   ### Create redis-master service from JSON
   # Pre-condition: Only the default kubernetes services are running
-  kube::test::get_object_assert services "{{range.items}}{{$id_field}}:{{end}}" 'kubernetes:kubernetes-ro:'
+  kube::test::get_object_assert services "{{range.items}}{{$id_field}}:{{end}}" 'kubernetes:'
   # Command
   kubectl create -f examples/guestbook/redis-master-service.json "${kube_flags[@]}"
   # Post-condition: redis-master service is running
-  kube::test::get_object_assert services "{{range.items}}{{$id_field}}:{{end}}" 'kubernetes:kubernetes-ro:redis-master:'
+  kube::test::get_object_assert services "{{range.items}}{{$id_field}}:{{end}}" 'kubernetes:redis-master:'
   # Describe command should print detailed information
   kube::test::describe_object_assert services 'redis-master' "Name:" "Labels:" "Selector:" "IP:" "Port:" "Endpoints:" "Session Affinity:"
 
@@ -412,23 +400,23 @@ for version in "${kube_api_versions[@]}"; do
 
   ### Delete redis-master-service by id
   # Pre-condition: redis-master service is running
-  kube::test::get_object_assert services "{{range.items}}{{$id_field}}:{{end}}" 'kubernetes:kubernetes-ro:redis-master:'
+  kube::test::get_object_assert services "{{range.items}}{{$id_field}}:{{end}}" 'kubernetes:redis-master:'
   # Command
   kubectl delete service redis-master "${kube_flags[@]}"
   # Post-condition: Only the default kubernetes services are running
-  kube::test::get_object_assert services "{{range.items}}{{$id_field}}:{{end}}" 'kubernetes:kubernetes-ro:'
+  kube::test::get_object_assert services "{{range.items}}{{$id_field}}:{{end}}" 'kubernetes:'
 
   ### Create redis-master-service from dumped JSON
   # Pre-condition: Only the default kubernetes services are running
-  kube::test::get_object_assert services "{{range.items}}{{$id_field}}:{{end}}" 'kubernetes:kubernetes-ro:'
+  kube::test::get_object_assert services "{{range.items}}{{$id_field}}:{{end}}" 'kubernetes:'
   # Command
   echo "${output_service}" | kubectl create -f - "${kube_flags[@]}"
   # Post-condition: redis-master service is running
-  kube::test::get_object_assert services "{{range.items}}{{$id_field}}:{{end}}" 'kubernetes:kubernetes-ro:redis-master:'
+  kube::test::get_object_assert services "{{range.items}}{{$id_field}}:{{end}}" 'kubernetes:redis-master:'
 
   ### Create redis-master-${version}-test service
   # Pre-condition: redis-master-service service is running
-  kube::test::get_object_assert services "{{range.items}}{{$id_field}}:{{end}}" 'kubernetes:kubernetes-ro:redis-master:'
+  kube::test::get_object_assert services "{{range.items}}{{$id_field}}:{{end}}" 'kubernetes:redis-master:'
   # Command
   kubectl create -f - "${kube_flags[@]}" << __EOF__
 {
@@ -449,36 +437,36 @@ for version in "${kube_api_versions[@]}"; do
 }
 __EOF__
   # Post-condition:redis-master-service service is running
-  kube::test::get_object_assert services "{{range.items}}{{$id_field}}:{{end}}" 'kubernetes:kubernetes-ro:redis-master:service-.*-test:'
+  kube::test::get_object_assert services "{{range.items}}{{$id_field}}:{{end}}" 'kubernetes:redis-master:service-.*-test:'
 
   ### Identity
   kubectl get service "${kube_flags[@]}" service-${version}-test -o json | kubectl update "${kube_flags[@]}" -f -
 
   ### Delete services by id
   # Pre-condition: redis-master-service service is running
-  kube::test::get_object_assert services "{{range.items}}{{$id_field}}:{{end}}" 'kubernetes:kubernetes-ro:redis-master:service-.*-test:'
+  kube::test::get_object_assert services "{{range.items}}{{$id_field}}:{{end}}" 'kubernetes:redis-master:service-.*-test:'
   # Command
   kubectl delete service redis-master "${kube_flags[@]}"
   kubectl delete service "service-${version}-test" "${kube_flags[@]}"
   # Post-condition: Only the default kubernetes services are running
-  kube::test::get_object_assert services "{{range.items}}{{$id_field}}:{{end}}" 'kubernetes:kubernetes-ro:'
+  kube::test::get_object_assert services "{{range.items}}{{$id_field}}:{{end}}" 'kubernetes:'
 
   ### Create two services
   # Pre-condition: Only the default kubernetes services are running
-  kube::test::get_object_assert services "{{range.items}}{{$id_field}}:{{end}}" 'kubernetes:kubernetes-ro:'
+  kube::test::get_object_assert services "{{range.items}}{{$id_field}}:{{end}}" 'kubernetes:'
   # Command
   kubectl create -f examples/guestbook/redis-master-service.json "${kube_flags[@]}"
   kubectl create -f examples/guestbook/redis-slave-service.json "${kube_flags[@]}"
   # Post-condition: redis-master and redis-slave services are running
-  kube::test::get_object_assert services "{{range.items}}{{$id_field}}:{{end}}" 'kubernetes:kubernetes-ro:redis-master:redis-slave:'
+  kube::test::get_object_assert services "{{range.items}}{{$id_field}}:{{end}}" 'kubernetes:redis-master:redis-slave:'
 
   ### Delete multiple services at once
   # Pre-condition: redis-master and redis-slave services are running
-  kube::test::get_object_assert services "{{range.items}}{{$id_field}}:{{end}}" 'kubernetes:kubernetes-ro:redis-master:redis-slave:'
+  kube::test::get_object_assert services "{{range.items}}{{$id_field}}:{{end}}" 'kubernetes:redis-master:redis-slave:'
   # Command
   kubectl delete services redis-master redis-slave "${kube_flags[@]}" # delete multiple services at once
   # Post-condition: Only the default kubernetes services are running
-  kube::test::get_object_assert services "{{range.items}}{{$id_field}}:{{end}}" 'kubernetes:kubernetes-ro:'
+  kube::test::get_object_assert services "{{range.items}}{{$id_field}}:{{end}}" 'kubernetes:'
 
 
   ###########################

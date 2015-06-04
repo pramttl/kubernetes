@@ -162,9 +162,9 @@ func startComponents(firstManifestURL, secondManifestURL, apiVersion string) (st
 		Authorizer:            apiserver.NewAlwaysAllowAuthorizer(),
 		AdmissionControl:      admit.NewAlwaysAdmit(),
 		ReadWritePort:         portNumber,
-		ReadOnlyPort:          portNumber,
 		PublicAddress:         publicAddress,
 		CacheTimeout:          2 * time.Second,
+		EnableV1:              true,
 	})
 	handler.delegate = m.Handler
 
@@ -176,6 +176,7 @@ func startComponents(firstManifestURL, secondManifestURL, apiVersion string) (st
 	}
 	eventBroadcaster := record.NewBroadcaster()
 	schedulerConfig.Recorder = eventBroadcaster.NewRecorder(api.EventSource{Component: "scheduler"})
+	eventBroadcaster.StartLogging(glog.Infof)
 	eventBroadcaster.StartRecordingToSink(cl.Events(""))
 	scheduler.New(schedulerConfig).Run()
 
@@ -622,6 +623,23 @@ func runPatchTest(c *client.Client) {
 				[]byte(`{"metadata":{"labels":{"$patch":"replace"}}}`),
 			},
 		},
+		"v1": {
+			api.JSONPatchType: {
+				[]byte(`[{"op":"add","path":"/metadata/labels","value":{"foo":"bar","baz":"qux"}}]`),
+				[]byte(`[{"op":"remove","path":"/metadata/labels/foo"}]`),
+				[]byte(`[{"op":"remove","path":"/metadata/labels"}]`),
+			},
+			api.MergePatchType: {
+				[]byte(`{"metadata":{"labels":{"foo":"bar","baz":"qux"}}}`),
+				[]byte(`{"metadata":{"labels":{"foo":null}}}`),
+				[]byte(`{"metadata":{"labels":null}}`),
+			},
+			api.StrategicMergePatchType: {
+				[]byte(`{"metadata":{"labels":{"foo":"bar","baz":"qux"}}}`),
+				[]byte(`{"metadata":{"labels":{"foo":null}}}`),
+				[]byte(`{"metadata":{"labels":{"$patch":"replace"}}}`),
+			},
+		},
 	}
 
 	pb := patchBodies[c.APIVersion()]
@@ -685,15 +703,12 @@ func runMasterServiceTest(client *client.Client) {
 	if err != nil {
 		glog.Fatalf("unexpected error listing services: %v", err)
 	}
-	var foundRW, foundRO bool
+	var foundRW bool
 	found := util.StringSet{}
 	for i := range svcList.Items {
 		found.Insert(svcList.Items[i].Name)
 		if svcList.Items[i].Name == "kubernetes" {
 			foundRW = true
-		}
-		if svcList.Items[i].Name == "kubernetes-ro" {
-			foundRO = true
 		}
 	}
 	if foundRW {
@@ -706,20 +721,7 @@ func runMasterServiceTest(client *client.Client) {
 		}
 	} else {
 		glog.Errorf("no RW service found: %v", found)
-	}
-	if foundRO {
-		ep, err := client.Endpoints(api.NamespaceDefault).Get("kubernetes-ro")
-		if err != nil {
-			glog.Fatalf("unexpected error listing endpoints for kubernetes service: %v", err)
-		}
-		if countEndpoints(ep) == 0 {
-			glog.Fatalf("no endpoints for kubernetes service: %v", ep)
-		}
-	} else {
-		glog.Errorf("no RO service found: %v", found)
-	}
-	if !foundRW || !foundRO {
-		glog.Fatalf("Kubernetes service test failed: %v", found)
+		glog.Fatal("Kubernetes service test failed")
 	}
 	glog.Infof("Master service test passed.")
 }
@@ -832,7 +834,7 @@ func runServiceTest(client *client.Client) {
 	for _, svc := range svcList.Items {
 		names.Insert(fmt.Sprintf("%s/%s", svc.Namespace, svc.Name))
 	}
-	if !names.HasAll("default/kubernetes", "default/kubernetes-ro", "default/service1", "default/service2", "other/service1") {
+	if !names.HasAll("default/kubernetes", "default/service1", "default/service2", "other/service1") {
 		glog.Fatalf("Unexpected service list: %#v", names)
 	}
 
@@ -878,12 +880,10 @@ func runSchedulerNoPhantomPodsTest(client *client.Client) {
 
 	// Delete a pod to free up room.
 	glog.Infof("Deleting pod %v", bar.Name)
-	err = client.Pods(api.NamespaceDefault).Delete(bar.Name, api.NewDeleteOptions(1))
+	err = client.Pods(api.NamespaceDefault).Delete(bar.Name, nil)
 	if err != nil {
 		glog.Fatalf("FAILED: couldn't delete pod %q: %v", bar.Name, err)
 	}
-
-	time.Sleep(2 * time.Second)
 
 	pod.ObjectMeta.Name = "phantom.baz"
 	baz, err := client.Pods(api.NamespaceDefault).Create(pod)
@@ -891,11 +891,7 @@ func runSchedulerNoPhantomPodsTest(client *client.Client) {
 		glog.Fatalf("Failed to create pod: %v, %v", pod, err)
 	}
 	if err := wait.Poll(time.Second, time.Second*60, podRunning(client, baz.Namespace, baz.Name)); err != nil {
-		if pod, perr := client.Pods(api.NamespaceDefault).Get("phantom.bar"); perr == nil {
-			glog.Fatalf("FAILED: 'phantom.bar' was never deleted: %#v", pod)
-		} else {
-			glog.Fatalf("FAILED: (Scheduler probably didn't process deletion of 'phantom.bar') Pod never started running: %v", err)
-		}
+		glog.Fatalf("FAILED: (Scheduler probably didn't process deletion of 'phantom.bar') Pod never started running: %v", err)
 	}
 
 	glog.Info("Scheduler doesn't make phantom pods: test passed.")
